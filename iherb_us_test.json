@@ -1,0 +1,110 @@
+[
+  {
+    "url": "https://www.iherb.com/pr/doctor-s-best-msm-with-optimsm-1-500-mg-120-tablets/3",
+    "title": "Doctor's Best, MSM with OptiMSM®, 1,500 mg, 120 Tablets",
+    "price": "13.99",
+    "currency": "USD",
+    "sku": "DRB-00097",
+    "brand": "Doctor's Best",
+    "availability": "InStock",
+    "description": "Science-Based Nutrition™ Supports Hair, Skin, Nails, & Joints Dietary Supplement Non-GMO / Gluten Free / Vegan At Doctor's Best, we value nature's beauty mineral. Our MSM formula featuring OptiMSM® delivers vital sulfur, crucial for collagen production and glucosamine synthesis. These elements are essential for maintaining skin integrity and promoting healthy bones and joints. Supports overall health for vibrant hair, skin, and nails. Supports joint comfort & mobility.",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00097/g/202.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Bone, Joint & Cartilage",
+      "MSM "
+    ],
+    "specs": {
+      "Model": "DRB-00097",
+      "UPC": "753950000971"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/bone-joint-cartilage",
+              "name": "Bone, Joint & Cartilage"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/msm",
+              "name": "MSM "
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "3",
+        "name": "Doctor's Best, MSM with OptiMSM®, 1,500 mg, 120 Tablets",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00097/g/202.jpg",
+        "mpn": "DRB-00097",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.6,
+          "reviewCount": 31199
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Doctor's Best",
+          "url": "http://www.drbvitamins.com/",
+          "identifier": "DRB"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.55",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "13.99",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Science-Based Nutrition™ Supports Hair, Skin, Nails, & Joints Dietary Supplement Non-GMO / Gluten Free / Vegan At Doctor's Best, we value nature's beauty mineral. Our MSM formula featuring OptiMSM® delivers vital sulfur, crucial for collagen production and glucosamine synthesis. These elements are essential for maintaining skin integrity and promoting healthy bones and joints. Supports overall health for vibrant hair, skin, and nails. Supports joint comfort & mobility.",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "2.5x2.5"
+        },
+        "isRelatedTo": null,
+        "sku": "DRB-00097",
+        "gtin12": "753950000971",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00097/g/202.jpg"
+      }
+    ]
+  }
+]

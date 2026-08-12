@@ -1,0 +1,52 @@
+HTTP/1.1 302 Found
+Date: Mon, 03 Aug 2026 17:49:27 GMT
+Content-Length: 0
+Connection: keep-alive
+Set-Cookie: iher-pref1=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: iher-pref1=lan=en-US&sccode=PK&scurcode=PKR&storeid=0; expires=Tue, 03 Aug 2027 17:49:27 GMT; domain=.iherb.com; path=/; secure; samesite=none
+Set-Cookie: ih-experiment=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: ih-experiment=eyJjYXZyIjp7IkVuZERhdGUiOiIyMDI3LTAxLTE5VDAwOjAwOjAwWiIsIkNob3NlblZhcmlhbnQiOjEsIlNvdXJjZSI6MX0sInNwcmFuayI6eyJFbmREYXRlIjoiMjAyNy0wMS0wMVQwMDowMDowMFoiLCJDaG9zZW5WYXJpYW50IjoxLCJTb3VyY2UiOjF9LCJyNHlyYW5rIjp7IkVuZERhdGUiOiIyMDI3LTAxLTAxVDAwOjAwOjAwWiIsIkNob3NlblZhcmlhbnQiOjAsIlNvdXJjZSI6MX0sIm5ld3JhbmsiOnsiRW5kRGF0ZSI6IjIwMjctMDEtMDFUMDA6MDA6MDBaIiwiQ2hvc2VuVmFyaWFudCI6MCwiU291cmNlIjoxfSwidHRyZWNzIjp7IkVuZERhdGUiOiIyMDI3LTAxLTAxVDAwOjAwOjAwWiIsIkNob3NlblZhcmlhbnQiOjEsIlNvdXJjZSI6MX0sIndlbGNvbWUtbWF0LWVuYWJsZWQiOnsiVmFyIjoiMSIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9LCJwbHBfc3BlY2lhbHNfY2Fyb3VzZWwiOnsiVmFyIjoiMSIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9LCJ3ZWxsbmVzcy1ib3QtZW50cmFuY2UtZW5oYW5jZW1lbnQiOnsiVmFyIjoiMiIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9LCJ3ZWxjb21lLW1hdC1mZWF0dXJlIjp7IlZhciI6Im9uIiwiRW5kRGF0ZSI6IiIsIlNvdXJjZSI6Mn0sInBkcF9hY3Rfc3RpY2t5X2J0biI6eyJWYXIiOiIyIiwiRW5kRGF0ZSI6IiIsIlNvdXJjZSI6Mn0sInBscF9jb21wb25lbnRzIjp7IlZhciI6IjIiLCJFbmREYXRlIjoiIiwiU291cmNlIjoyfSwicGRwX3dlbGxuZXNzIjp7IlZhciI6IjEiLCJFbmREYXRlIjoiIiwiU291cmNlIjoyfSwic2VycF9haV9oZWFkZXIiOnsiVmFyIjoiMCIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9LCJkdC1ocC1iZW50by1oZXJvLWJhbm5lciI6eyJWYXIiOiJvbiIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9LCJwZHBfYnVuZGxlX2Rpc2NvdW50Ijp7IlZhciI6IjEiLCJFbmREYXRlIjoiIiwiU291cmNlIjoyfSwibXdfc2VycF9iYW5uZXJfaW1wYWN0Ijp7IlZhciI6IjAiLCJFbmREYXRlIjoiIiwiU291cmNlIjoyfSwicGRwX2FpX2NvbXBhcmlzb25fdGFibGUiOnsiVmFyIjoiMiIsIkVuZERhdGUiOiIiLCJTb3VyY2UiOjJ9fQ==; expires=Tue, 03 Aug 2027 17:49:27 GMT; domain=.iherb.com; path=/; samesite=lax
+Set-Cookie: ih-exp-user-id=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: ih-exp-user-id=1785779367694-0783e8e4-c5d2-4656-8a77-18cda78affb8; expires=Mon, 01 Feb 2027 17:49:27 GMT; domain=.iherb.com; path=/; samesite=lax
+Set-Cookie: ih-preference=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: ih-preference=country=PK&currency=PKR&language=en-US&store=0; expires=Tue, 03 Aug 2027 17:49:27 GMT; domain=.iherb.com; path=/; secure; samesite=none
+Set-Cookie: ih-pv-pr=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: ih-pv-pr=wp=2~0; expires=Tue, 03 Aug 2027 17:49:27 GMT; domain=.iherb.com; path=/; secure; samesite=none
+set-cookie: __cf_bm=1eFejQ6EyW9NhDJ06zWjETm_L1xXQP0wAgyd97NDias-1785779367.6164663-1.0.1.1-9Wo7MeiMwOy6jFqsOc14HLeZhDcJWwAhbGyedZTx0lp5yP26_fhXy_2cce07CVNxvtssPg3yRXSB7GkwlsL7aBrAMsbdw1KsM8Q5vhixu56xgCRsVDASYEBU7x4nCxCOQisennKk4oJTEkJ3ngSf3A; HttpOnly; SameSite=None; Secure; Path=/; Domain=iherb.com; Expires=Mon, 03 Aug 2026 18:19:27 GMT
+location: https://pk.iherb.com/pr/doctor-s-best-msm-with-optimsm-1-500-mg-120-tablets/3
+Cache-Control: no-store
+Vary: accept-encoding
+x-request-id: 1797030c1d1dc6dffc185a1ece065034
+datacenter: hongkong-catalog-0
+buildnumber: 1.0.21813
+cdn-cache-control: no-store
+x-client-id: page-product
+strict-transport-security: max-age=31536000; includeSubDomains
+cf-cache-status: BYPASS
+Server: cloudflare
+CF-RAY: a25728b79f2b9087-KHI
+alt-svc: h3=":443"; ma=86400
+
+HTTP/1.1 200 OK
+Date: Mon, 03 Aug 2026 17:49:28 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+vary: Accept-Encoding
+Cache-Control: public, no-store
+Set-Cookie: ih-preference=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: ih-preference=country=PK&currency=PKR&language=en-US&store=0; expires=Tue, 03 Aug 2027 17:49:28 GMT; domain=.iherb.com; path=/; secure; samesite=none
+Set-Cookie: iher-pref1=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+Set-Cookie: iher-pref1=lan=en-US&sccode=PK&scurcode=PKR&storeid=0&wp=2; expires=Tue, 03 Aug 2027 17:49:28 GMT; domain=.iherb.com; path=/; secure; samesite=none
+x-request-id: d9837370f9627ac6d8b0d2f95f509ba7
+datacenter: hongkong-catalog-0
+buildnumber: 1.0.21813
+cdn-cache-control: max-age=900, stale-if-error=900, stale-while-revalidate=900
+x-client-id: page-product
+strict-transport-security: max-age=31536000; includeSubDomains
+cf-cache-status: BYPASS
+Content-Encoding: gzip
+Server: cloudflare
+CF-RAY: a25728b9dbfec919-KHI
+alt-svc: h3=":443"; ma=86400
+

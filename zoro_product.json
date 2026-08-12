@@ -1,0 +1,139 @@
+[
+  {
+    "url": "https://www.zoro.com/milwaukee-tool-m18-compact-brushless-2-tool-combo-kit-cordless-drillimpact-driver-w-batteries-charger-bag-3692-22ct/i/G709977501/",
+    "title": "M18 Compact Brushless 2-Tool Combo Kit, Cordless Drill/Impact Driver w/ Batteries, Charger, Bag",
+    "price": "249.99",
+    "currency": "USD",
+    "sku": "G709977501",
+    "brand": "Milwaukee Tool",
+    "availability": "InStock",
+    "description": "<p>The MILWAUKEE M18 Compact Brushless 2-Tool Combo Kit is more compact with faster speeds in the application. Includes the M18 Compact Brushless 1/2\" Drill Driver, M18 Compact Brushless 1/4\" Hex Impact Driver, (2) M18 REDLITHIUM CP2.0 Battery Packs, M18/M12 Multi-volt Charger and Contractor Bag. The compact drill is 5.7\" in length and lightweight at 2.3 lbs without a battery, allowing for excellent control, especially while working in overhead or tight spaces. The brushless motor was built to ensure optimal tool performance delivering 550 in-lbs of torque and 0-1,700 RPM, able to tackle a wide range of drilling and fastening applications. The impact driver measures only 4.4\" in length and 2.1\" in width, allowing for better access in tight spaces while being lightweight and portable. The brushless motor technology provides 1,700 in-lbs of torque and 3600 RPMs for faster speed and increased productivity. MILWAUKEE REDLINK Intelligence optimizes the way the M18 REDLITHIUM batteries work with the tools for best-in-class performance. These cordless tools have premium components, including an all-metal gear case and 1/4\" metal chuck providing the durability that professionals require. The M18 Compact Brushless 2-Tool Combo Kit is part of the M18 system, fully compatible with over 250+-solutions.</p><br><ul><li>Compact size allows for unrivaled access in tight spaces</li><li>Brushless Motor delivers the power to quickly complete most common applications</li><li>Professional Durability with all metal gearcase and gears</li><li>Impact: 0-3600 RPMs</li><li>Impact: 1,700 in-lbs. of Peak Torque</li><li>Drill: 550-in./lbs. of torque</li><li>Drill: 0-500 RPM to 0-1700 RPM</li><li>Drill: 5.7\" in Length</li><li>Impact: 4.4\" in Length and 2.1\" in Width</li><li>REDLITHIUM Battery: Superior pack construction, electronics, and performance deliver more work per charge and more work over pack life than any battery on the market</li></ul>",
+    "image": "{'@type': 'ImageObject', 'contentUrl': 'https://www.zoro.com/static/cms/product/large/c9aa07d4-cadd-4b6b-b5d2-d18267ba7d0c.jpeg', 'thumbnailUrl': 'https://www.zoro.com/static/cms/product/petit/c9aa07d4-cadd-4b6b-b5d2-d18267ba7d0c.jpeg'}",
+    "breadcrumbs": [],
+    "specs": {},
+    "raw_jsonld": [
+      {
+        "@context": "http://schema.org",
+        "@type": "Product",
+        "sku": "G709977501",
+        "mpn": "3692-22CT",
+        "name": "M18 Compact Brushless 2-Tool Combo Kit, Cordless Drill/Impact Driver w/ Batteries, Charger, Bag",
+        "brand": {
+          "@type": "Brand",
+          "name": "Milwaukee Tool"
+        },
+        "gtin12": "045242786183",
+        "description": "<p>The MILWAUKEE M18 Compact Brushless 2-Tool Combo Kit is more compact with faster speeds in the application. Includes the M18 Compact Brushless 1/2\" Drill Driver, M18 Compact Brushless 1/4\" Hex Impact Driver, (2) M18 REDLITHIUM CP2.0 Battery Packs, M18/M12 Multi-volt Charger and Contractor Bag. The compact drill is 5.7\" in length and lightweight at 2.3 lbs without a battery, allowing for excellent control, especially while working in overhead or tight spaces. The brushless motor was built to ensure optimal tool performance delivering 550 in-lbs of torque and 0-1,700 RPM, able to tackle a wide range of drilling and fastening applications. The impact driver measures only 4.4\" in length and 2.1\" in width, allowing for better access in tight spaces while being lightweight and portable. The brushless motor technology provides 1,700 in-lbs of torque and 3600 RPMs for faster speed and increased productivity. MILWAUKEE REDLINK Intelligence optimizes the way the M18 REDLITHIUM batteries work with the tools for best-in-class performance. These cordless tools have premium components, including an all-metal gear case and 1/4\" metal chuck providing the durability that professionals require. The M18 Compact Brushless 2-Tool Combo Kit is part of the M18 system, fully compatible with over 250+-solutions.</p><br><ul><li>Compact size allows for unrivaled access in tight spaces</li><li>Brushless Motor delivers the power to quickly complete most common applications</li><li>Professional Durability with all metal gearcase and gears</li><li>Impact: 0-3600 RPMs</li><li>Impact: 1,700 in-lbs. of Peak Torque</li><li>Drill: 550-in./lbs. of torque</li><li>Drill: 0-500 RPM to 0-1700 RPM</li><li>Drill: 5.7\" in Length</li><li>Impact: 4.4\" in Length and 2.1\" in Width</li><li>REDLITHIUM Battery: Superior pack construction, electronics, and performance deliver more work per charge and more work over pack life than any battery on the market</li></ul>",
+        "offers": {
+          "@type": "Offer",
+          "url": "https://www.zoro.com/milwaukee-tool-m18-compact-brushless-2-tool-combo-kit-cordless-drillimpact-driver-w-batteries-charger-bag-3692-22ct/i/G709977501/",
+          "availability": "http://schema.org/InStock",
+          "priceValidUntil": "2026-07-21",
+          "price": "249.99",
+          "priceCurrency": "USD"
+        },
+        "image": [
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/c9aa07d4-cadd-4b6b-b5d2-d18267ba7d0c.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/c9aa07d4-cadd-4b6b-b5d2-d18267ba7d0c.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/02bf010b-285d-48a7-bc2a-e5ea44ee974c.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/02bf010b-285d-48a7-bc2a-e5ea44ee974c.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/119c59a4-3513-4293-b7b9-8e635a8e946b.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/119c59a4-3513-4293-b7b9-8e635a8e946b.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx5xx3f1d3a.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx5xx3f1d3a.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx10xxeec120.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx10xxeec120.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx6xxb7b2d9.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx6xxb7b2d9.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/4e276f6a-e6d8-4361-8600-f0c627765647.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/4e276f6a-e6d8-4361-8600-f0c627765647.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/5310052e-1b8b-40be-a70c-6b54c6731424.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/5310052e-1b8b-40be-a70c-6b54c6731424.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx2xx3d310e.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx2xx3d310e.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/7192a9b9-95f2-4454-af28-8ac9f2e4329e.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/7192a9b9-95f2-4454-af28-8ac9f2e4329e.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx4xx5d80b1.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx4xx5d80b1.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/77b8d160-26e7-4c07-9d9c-18559c6b70eb.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/77b8d160-26e7-4c07-9d9c-18559c6b70eb.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx7xx05e178.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx7xx05e178.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/96427036-4b4d-42b8-8d14-27277b33d92d.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/96427036-4b4d-42b8-8d14-27277b33d92d.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx3xxdcbc7e.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx3xxdcbc7e.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/ba2f9095-3a27-4705-93d9-eac2e67f5ace.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/ba2f9095-3a27-4705-93d9-eac2e67f5ace.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx8xx94feab.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx8xx94feab.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/Grainger_3692xx22CTxx9xx7ff561.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/Grainger_3692xx22CTxx9xx7ff561.jpeg"
+          },
+          {
+            "@type": "ImageObject",
+            "contentUrl": "https://www.zoro.com/static/cms/product/large/eb4d8c58-4d48-469e-a6b7-c57f143be95c.jpeg",
+            "thumbnailUrl": "https://www.zoro.com/static/cms/product/petit/eb4d8c58-4d48-469e-a6b7-c57f143be95c.jpeg"
+          }
+        ],
+        "weight": "10.06 lb",
+        "color": "Black, Red",
+        "material": "Glass-Filled Nylon",
+        "width": "4.45 in"
+      }
+    ]
+  }
+]

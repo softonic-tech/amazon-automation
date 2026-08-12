@@ -1,0 +1,219 @@
+# ============================================================
+# Amazon Sourcing Tool — .gitignore
+# ============================================================
+# Keep the repo clean: only code + docs, no test data or secrets.
+
+# ------------------------------------------------------------
+# Secrets & environment variables
+# ------------------------------------------------------------
+.env
+.env.local
+.env.production
+.env.*.local
+*.env
+secrets.json
+credentials.json
+config.json
+sourcing_config.json
+!sourcing_config.example.json    # KEEP the example, ignore the real one
+
+# API keys or tokens accidentally saved to disk
+keepa_key.txt
+api_key.txt
+*.key
+*.pem
+
+# ------------------------------------------------------------
+# Generated outputs — spreadsheets, JSON scrape results
+# ------------------------------------------------------------
+*.xlsx
+*.xls
+*.csv
+!demo_sourcing.xlsx              # KEEP if this is a template you commit
+!requirements.xlsx               # (adjust these exceptions to your needs)
+
+# Scraped product data
+*.json
+!package.json                    # KEEP node/npm configs
+!package-lock.json
+!tsconfig.json
+!sourcing_config.example.json    # KEEP the example config
+
+# Explicit patterns for our tool's outputs
+iherb_*.json
+iherb_*.xlsx
+zoro_*.json
+zoro_*.xlsx
+test_*.json
+test_*.xlsx
+sourcing_*.xlsx
+*_result.xlsx
+*_batch.json
+*_run.xlsx
+*_test.xlsx
+noni_test.json
+iherb_debug.json
+iherb_us_test.json
+iherb_us_run.xlsx
+iherb_over25.xlsx
+iherb_now_foods.xlsx
+
+# Downloaded diagnostic HTML pages
+first-response.html
+*.html
+!templates/*.html                # KEEP Flask templates if you have them
+
+# Header dumps from curl testing
+headers.txt
+
+# ------------------------------------------------------------
+# Webapp runtime data
+# ------------------------------------------------------------
+.webapp_runs/
+webapp_runs/
+runs/
+uploads/
+downloads/
+
+# ------------------------------------------------------------
+# Python
+# ------------------------------------------------------------
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.hypothesis/
+coverage.xml
+*.cover
+*.py,cover
+
+# Type checking
+.mypy_cache/
+.pyright/
+.pyre/
+.pytype/
+
+# Ruff / linting
+.ruff_cache/
+
+# ------------------------------------------------------------
+# IDEs and editors
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
+.spyderproject
+.spyproject
+
+# ------------------------------------------------------------
+# OS-generated files
+# ------------------------------------------------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+logs/
+log/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ------------------------------------------------------------
+# Node.js (if webapp adds any JS tooling later)
+# ------------------------------------------------------------
+node_modules/
+.npm
+.yarn-integrity
+
+# ------------------------------------------------------------
+# Playwright / Browser automation caches
+# ------------------------------------------------------------
+.playwright/
+playwright-report/
+test-results/
+.cache/
+browser-cache/
+
+# ------------------------------------------------------------
+# Database / storage (in case you add later)
+# ------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# ------------------------------------------------------------
+# Backup files
+# ------------------------------------------------------------
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+
+# ------------------------------------------------------------
+# Local development files
+# ------------------------------------------------------------
+scratch/
+playground/
+notes.md
+todo.md
+TODO.md
+NOTES.md
+.local/

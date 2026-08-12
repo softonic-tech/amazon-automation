@@ -1,0 +1,551 @@
+[
+  {
+    "url": "https://www.iherb.com/pr/doctor-s-best-5-htp-enhanced-with-vitamins-b6-and-c-120-veggie-caps/8",
+    "title": "Doctor's Best, 5-HTP, Enhanced with Vitamins B6 and C, 120 Veggie Caps",
+    "price": "16.99",
+    "currency": "USD",
+    "sku": "DRB-00120",
+    "brand": "Doctor's Best",
+    "availability": "InStock",
+    "description": "Science-Based Nutrition™ Support Mental & Emotional Well-Being Dietary Supplement Non-GMO · Gluten Free · Soy Free · Vegan At Doctor's Best, we are all about the journey to happiness. Our premium 5-HTP formula, derived from Griffonia simplicifolia seeds and enriched with Vitamin B6 and C, is meticulously designed to support the conversion of 5-HTP into serotonin to maintain optimal levels. This neurotransmitter is crucial for regulating mood, appetite, and nurturing emotional and mental well-being, while contributing to relaxation. Supports healthy mood and relaxation Helps maintain mental & emotional well-being",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00120/g/121.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Weight Management",
+      "5-HTP"
+    ],
+    "specs": {
+      "Model": "DRB-00120",
+      "UPC": "753950001206"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/weight-management",
+              "name": "Weight Management"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/5-htp",
+              "name": "5-HTP"
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "8",
+        "name": "Doctor's Best, 5-HTP, Enhanced with Vitamins B6 and C, 120 Veggie Caps",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00120/g/121.jpg",
+        "mpn": "DRB-00120",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.8,
+          "reviewCount": 4679
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Doctor's Best",
+          "url": "http://www.drbvitamins.com/",
+          "identifier": "DRB"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.25",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "16.99",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Science-Based Nutrition™ Support Mental & Emotional Well-Being Dietary Supplement Non-GMO · Gluten Free · Soy Free · Vegan At Doctor's Best, we are all about the journey to happiness. Our premium 5-HTP formula, derived from Griffonia simplicifolia seeds and enriched with Vitamin B6 and C, is meticulously designed to support the conversion of 5-HTP into serotonin to maintain optimal levels. This neurotransmitter is crucial for regulating mood, appetite, and nurturing emotional and mental well-being, while contributing to relaxation. Supports healthy mood and relaxation Helps maintain mental & emotional well-being",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "2.35x2.35"
+        },
+        "isRelatedTo": null,
+        "sku": "DRB-00120",
+        "gtin12": "753950001206",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00120/g/121.jpg"
+      }
+    ]
+  },
+  {
+    "url": "https://www.iherb.com/pr/jarrow-formulas-taurine-1-000-mg-100-capsules/133",
+    "title": "Jarrow Formulas, Taurine , 1,000 mg, 100 Capsules",
+    "price": "12.83",
+    "currency": "USD",
+    "sku": "JRW-15020",
+    "brand": "Jarrow Formulas",
+    "availability": "InStock",
+    "description": "Antioxidant Supports Neuroprotection Gluten Free Dietary Supplement Amino Acid 1gen™ Non-GMO Tested Taurine is a sulfur-containing, antioxidant amino acid that supports osmoregulation (maintenance of concentrations of ions) inside the cells, membrane stabilization, bile acid conjugation, and neuroprotection.",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw15020/g/35.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Amino Acids",
+      "Taurine"
+    ],
+    "specs": {
+      "Model": "JRW-15020",
+      "UPC": "790011150206"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/amino-acids",
+              "name": "Amino Acids"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/taurine",
+              "name": "Taurine"
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "133",
+        "name": "Jarrow Formulas, Taurine , 1,000 mg, 100 Capsules",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw15020/g/35.jpg",
+        "mpn": "JRW-15020",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.9,
+          "reviewCount": 7764
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Jarrow Formulas",
+          "url": "http://www.jarrow.com/",
+          "identifier": "JRW"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.35",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "12.83",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Antioxidant Supports Neuroprotection Gluten Free Dietary Supplement Amino Acid 1gen™ Non-GMO Tested Taurine is a sulfur-containing, antioxidant amino acid that supports osmoregulation (maintenance of concentrations of ions) inside the cells, membrane stabilization, bile acid conjugation, and neuroprotection.",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "2.45x2.45"
+        },
+        "isRelatedTo": null,
+        "sku": "JRW-15020",
+        "gtin12": "790011150206",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw15020/g/35.jpg"
+      }
+    ]
+  },
+  {
+    "url": "https://www.iherb.com/pr/jarrow-formulas-q-absorb-ubiquinone-co-q10-100-mg-60-softgels/142",
+    "title": "Jarrow Formulas, Q-Absorb, Ubiquinone CO-Q10, 100 mg, 60 Softgels",
+    "price": "32.11",
+    "currency": "USD",
+    "sku": "JRW-06012",
+    "brand": "Jarrow Formulas",
+    "availability": "InStock",
+    "description": "Kaneka Q10® Ultra Absorption Supports Mitochondrial Health, Cellular Energy Production, and Healthy Cardiovascular Function Proliposome Delivery Gluten Free Dietary Supplement Heart Support Jarrow Formulas® Q-absorb® provides Co-Q10 (Ubiquinone), an antioxidant that supports normal mitochondrial function-the power factories within our cells-in a proprietary proliposome lipid-soluble delivery system for better absorption. Co-Q10 helps promote mitochondrial health, cellular energy production, and healthy cardiovascular function.",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06012/g/87.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Antioxidants",
+      "Coenzyme Q10 (Ubiquinone)"
+    ],
+    "specs": {
+      "Model": "JRW-06012",
+      "UPC": "790011060123"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/antioxidants",
+              "name": "Antioxidants"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/coenzyme-q10-ubiquinone",
+              "name": "Coenzyme Q10 (Ubiquinone)"
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "142",
+        "name": "Jarrow Formulas, Q-Absorb, Ubiquinone CO-Q10, 100 mg, 60 Softgels",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06012/g/87.jpg",
+        "mpn": "JRW-06012",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.7,
+          "reviewCount": 1318
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Jarrow Formulas",
+          "url": "http://www.jarrow.com/",
+          "identifier": "JRW"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.25",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "32.11",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Kaneka Q10® Ultra Absorption Supports Mitochondrial Health, Cellular Energy Production, and Healthy Cardiovascular Function Proliposome Delivery Gluten Free Dietary Supplement Heart Support Jarrow Formulas® Q-absorb® provides Co-Q10 (Ubiquinone), an antioxidant that supports normal mitochondrial function-the power factories within our cells-in a proprietary proliposome lipid-soluble delivery system for better absorption. Co-Q10 helps promote mitochondrial health, cellular energy production, and healthy cardiovascular function.",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "2.1x2.05"
+        },
+        "isRelatedTo": null,
+        "sku": "JRW-06012",
+        "gtin12": "790011060123",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06012/g/87.jpg"
+      }
+    ]
+  },
+  {
+    "url": "https://www.iherb.com/pr/doctor-s-best-high-absorption-magnesium-120-tablets-100-mg-per-tablet/15",
+    "title": "Doctor's Best, High Absorption Magnesium, 120 Tablets (100 mg per Tablet)",
+    "price": "13.99",
+    "currency": "USD",
+    "sku": "DRB-00025",
+    "brand": "Doctor's Best",
+    "availability": "InStock",
+    "description": "Science-Based Nutrition™ Lysinate Glycinate 100% Chelated Muscle Relaxation & Sleep Support Albion® Minerals Dietary Supplement Non-GMO Gluten Free Soy Free Vegan At Doctor's Best, our high absorption magnesium is the ultimate multitasker, crucial for a range of bodily functions. Our specialized magnesium formula provides essential support for muscles, nerves, sleep quality, and maintaining a balanced mood. Essential in 600 enzyme systems that support biochemical functions. Up to 6x better absorbed than other forms of magnesium. TRAACS® chelate technology from Albion®.",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00025/g/124.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Minerals",
+      "Magnesium",
+      "Magnesium Glycinate"
+    ],
+    "specs": {
+      "Model": "DRB-00025",
+      "UPC": "753950000254"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/minerals",
+              "name": "Minerals"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/magnesium",
+              "name": "Magnesium"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 5,
+            "item": {
+              "@id": "https://www.iherb.com/c/magnesium-glycinate",
+              "name": "Magnesium Glycinate"
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "15",
+        "name": "Doctor's Best, High Absorption Magnesium, 120 Tablets (100 mg per Tablet)",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00025/g/124.jpg",
+        "mpn": "DRB-00025",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.8,
+          "reviewCount": 209037
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Doctor's Best",
+          "url": "http://www.drbvitamins.com/",
+          "identifier": "DRB"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.43",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "13.99",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Science-Based Nutrition™ Lysinate Glycinate 100% Chelated Muscle Relaxation & Sleep Support Albion® Minerals Dietary Supplement Non-GMO Gluten Free Soy Free Vegan At Doctor's Best, our high absorption magnesium is the ultimate multitasker, crucial for a range of bodily functions. Our specialized magnesium formula provides essential support for muscles, nerves, sleep quality, and maintaining a balanced mood. Essential in 600 enzyme systems that support biochemical functions. Up to 6x better absorbed than other forms of magnesium. TRAACS® chelate technology from Albion®.",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "2.35x2.35"
+        },
+        "isRelatedTo": null,
+        "sku": "DRB-00025",
+        "gtin12": "753950000254",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/drb/drb00025/g/124.jpg"
+      }
+    ]
+  },
+  {
+    "url": "https://www.iherb.com/pr/jarrow-formulas-co-q10-100-mg-60-veggie-capsules/111",
+    "title": "Jarrow Formulas, Co-Q10, 100 mg, 60 Veggie Capsules",
+    "price": "20.18",
+    "currency": "USD",
+    "sku": "JRW-06003",
+    "brand": "Jarrow Formulas",
+    "availability": "InStock",
+    "description": "Kaneka Q10 ® Vegan Gluten Free Regular Strength Supports Mitochondrial Health and Healthy Cardiovascular Function Helps Restore Co-Q10 Levels Reduced by Statins and/or Aging Heart Support Dietary Supplement Jarrow Formulas® Co-Q10 (Ubiquinone) is an antioxidant that supports normal mitochondrial function, the power factories within our cells. It is found in the cells of energy rich tissues like the heart, but with age these levels decrease. Co-Q10 helps support mitochondrial health and healthy cardiovascular function, while also helping to restore Co-Q10 levels reduced by statins and/or aging.",
+    "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06003/g/81.jpg",
+    "breadcrumbs": [
+      "Categories",
+      "Supplements",
+      "Antioxidants",
+      "Coenzyme Q10 (Ubiquinone)"
+    ],
+    "specs": {
+      "Model": "JRW-06003",
+      "UPC": "790011060031"
+    },
+    "raw_jsonld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@id": "https://www.iherb.com/c/categories",
+              "name": "Categories"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@id": "https://www.iherb.com/c/supplements",
+              "name": "Supplements"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 3,
+            "item": {
+              "@id": "https://www.iherb.com/c/antioxidants",
+              "name": "Antioxidants"
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 4,
+            "item": {
+              "@id": "https://www.iherb.com/c/coenzyme-q10-ubiquinone",
+              "name": "Coenzyme Q10 (Ubiquinone)"
+            }
+          }
+        ]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "productID": "111",
+        "name": "Jarrow Formulas, Co-Q10, 100 mg, 60 Veggie Capsules",
+        "logo": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06003/g/81.jpg",
+        "mpn": "JRW-06003",
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": 4.8,
+          "reviewCount": 2704
+        },
+        "brand": {
+          "@type": "Brand",
+          "name": "Jarrow Formulas",
+          "url": "http://www.jarrow.com/",
+          "identifier": "JRW"
+        },
+        "category": {
+          "@type": "Thing",
+          "name": "Supplements",
+          "identifier": "1855"
+        },
+        "weight": {
+          "@type": "QuantitativeValue",
+          "value": "0.10",
+          "unitText": "lb"
+        },
+        "offers": {
+          "@type": "Offer",
+          "availability": "https://schema.org/InStock",
+          "price": "20.18",
+          "priceCurrency": "USD",
+          "priceSpecification": [],
+          "offerCount": null,
+          "availabilityStarts": null
+        },
+        "description": "Kaneka Q10 ® Vegan Gluten Free Regular Strength Supports Mitochondrial Health and Healthy Cardiovascular Function Helps Restore Co-Q10 Levels Reduced by Statins and/or Aging Heart Support Dietary Supplement Jarrow Formulas® Co-Q10 (Ubiquinone) is an antioxidant that supports normal mitochondrial function, the power factories within our cells. It is found in the cells of energy rich tissues like the heart, but with age these levels decrease. Co-Q10 helps support mitochondrial health and healthy cardiovascular function, while also helping to restore Co-Q10 levels reduced by statins and/or aging.",
+        "size": {
+          "@type": "SizeSpecification",
+          "name": "1.8x1.75"
+        },
+        "isRelatedTo": null,
+        "sku": "JRW-06003",
+        "gtin12": "790011060031",
+        "image": "https://cloudinary.images-iherb.com/image/upload/f_auto,q_auto:eco/images/jrw/jrw06003/g/81.jpg"
+      }
+    ]
+  }
+]
