@@ -1,0 +1,35 @@
+[Unit]
+Description=Amazon FBM Sourcing Tool (Flask + gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=sourcing
+Group=sourcing
+WorkingDirectory=/opt/amazon-sourcing/app
+EnvironmentFile=/opt/amazon-sourcing/app/.env
+
+# Gunicorn: 1 worker (subprocess jobs + in-process JOBS dict = must stay single-worker),
+# 4 threads so the browser can poll /status while a scrape runs, generous timeout because
+# some Keepa batches take a while.
+ExecStart=/opt/amazon-sourcing/app/venv/bin/gunicorn \
+    --workers 1 \
+    --threads 4 \
+    --timeout 300 \
+    --bind 127.0.0.1:5000 \
+    --access-logfile - \
+    --error-logfile - \
+    webapp:app
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/amazon-sourcing/app
+
+[Install]
+WantedBy=multi-user.target
