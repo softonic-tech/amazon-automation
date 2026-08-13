@@ -98,6 +98,10 @@ nginx -t
 systemctl daemon-reload
 systemctl enable --now amazon-sourcing
 systemctl restart amazon-sourcing
+
+# `enable --now` starts nginx if it isn't already running, and `reload` picks
+# up the new site config if it is. This handles both fresh installs and re-runs.
+systemctl enable --now nginx
 systemctl reload nginx
 
 echo "==> [7/7] Configuring UFW firewall (SSH + HTTP)"
