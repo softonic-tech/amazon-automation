@@ -28,6 +28,10 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/softonic-tech/amazon-automation.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
+# Public port nginx listens on. Set LISTEN_PORT=8080 if port 80 is already
+# taken by another service (e.g. Docker control panel on some VPS templates).
+LISTEN_PORT="${LISTEN_PORT:-80}"
+
 APP_USER="sourcing"
 APP_ROOT="/opt/amazon-sourcing"
 APP_DIR="$APP_ROOT/app"
@@ -80,9 +84,17 @@ ENV_EOF
 chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"
 
-echo "==> [6/7] Installing systemd service + nginx site"
+echo "==> [6/7] Installing systemd service + nginx site (listen on port $LISTEN_PORT)"
 install -m 0644 "$APP_DIR/deploy/amazon-sourcing.service" /etc/systemd/system/amazon-sourcing.service
 install -m 0644 "$APP_DIR/deploy/nginx-amazon-sourcing.conf" /etc/nginx/sites-available/amazon-sourcing
+
+# Rewrite the listen port if the caller asked for something other than 80.
+if [[ "$LISTEN_PORT" != "80" ]]; then
+    sed -i "s/listen 80 default_server;/listen $LISTEN_PORT default_server;/" \
+        /etc/nginx/sites-available/amazon-sourcing
+    sed -i "s/listen \[::\]:80 default_server;/listen [::]:$LISTEN_PORT default_server;/" \
+        /etc/nginx/sites-available/amazon-sourcing
+fi
 
 # Enable the nginx site + drop the default one so port 80 is ours.
 ln -sf /etc/nginx/sites-available/amazon-sourcing /etc/nginx/sites-enabled/amazon-sourcing
@@ -104,21 +116,30 @@ systemctl restart amazon-sourcing
 systemctl enable --now nginx
 systemctl reload nginx
 
-echo "==> [7/7] Configuring UFW firewall (SSH + HTTP)"
+echo "==> [7/7] Configuring UFW firewall (SSH + port $LISTEN_PORT)"
 ufw --force reset >/dev/null
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow OpenSSH
-ufw allow 'Nginx HTTP'
+if [[ "$LISTEN_PORT" == "80" ]]; then
+    ufw allow 'Nginx HTTP'
+else
+    ufw allow "$LISTEN_PORT/tcp" comment 'Amazon Sourcing UI'
+fi
 ufw --force enable
 
 IP=$(curl -fsS -4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+if [[ "$LISTEN_PORT" == "80" ]]; then
+    URL="http://$IP/"
+else
+    URL="http://$IP:$LISTEN_PORT/"
+fi
 
 cat <<DONE
 
 ============================================================
   Amazon Sourcing Tool is deployed.
-  URL:       http://$IP/
+  URL:       $URL
   Username:  $BASIC_AUTH_USER
   Password:  (the one you passed via BASIC_AUTH_PASS)
 
