@@ -24,14 +24,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from datetime import timedelta
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template_string, request, send_file, abort
+from flask import (
+    Flask, abort, jsonify, redirect, render_template_string,
+    request, send_file, session, url_for,
+)
 
 from sourcing import SourcingConfig
 
@@ -52,6 +58,46 @@ WORK_DIR.mkdir(exist_ok=True)
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------- #
+# Auth: signed-cookie sessions (no database, ~microseconds/req)    #
+# ---------------------------------------------------------------- #
+
+# SECRET_KEY signs the session cookie. Must be stable across restarts, otherwise
+# every user gets logged out on redeploy. setup_vps.sh generates one and writes
+# it to .env. If missing (dev), fall back to an ephemeral one and warn.
+_secret = os.environ.get("SECRET_KEY", "").strip()
+if not _secret:
+    log.warning("SECRET_KEY not set — using ephemeral key. Sessions won't "
+                "survive restart. Set SECRET_KEY in .env for production.")
+    _secret = secrets.token_hex(32)
+app.config["SECRET_KEY"] = _secret
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Set SESSION_COOKIE_SECURE=1 in .env once you're behind HTTPS.
+if os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"):
+    app.config["SESSION_COOKIE_SECURE"] = True
+
+APP_USERNAME = os.environ.get("APP_USERNAME", "").strip()
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
+AUTH_ENABLED = bool(APP_USERNAME and APP_PASSWORD)
+if not AUTH_ENABLED:
+    log.warning("APP_USERNAME/APP_PASSWORD not set — auth is DISABLED (dev "
+                "mode). Set both in .env for production.")
+
+
+def require_login(fn):
+    """Redirect HTML routes to /login, return 401 JSON for /api/*."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not AUTH_ENABLED or session.get("user") == APP_USERNAME:
+            return fn(*args, **kwargs)
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "unauthorized"}), 401
+        return redirect(url_for("login", next=request.path))
+    return wrapper
 
 
 # ---------------------------------------------------------------- #
@@ -329,16 +375,55 @@ def _job_scrape_and_analyze(job_id: str, params: dict) -> None:
 # Routes                                                           #
 # ---------------------------------------------------------------- #
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not AUTH_ENABLED:
+        return redirect(url_for("index"))
+    if session.get("user") == APP_USERNAME:
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        u = (request.form.get("username") or "").strip()
+        p = request.form.get("password") or ""
+        remember = request.form.get("remember") == "on"
+        # secrets.compare_digest is constant-time — resists timing attacks.
+        if (secrets.compare_digest(u, APP_USERNAME)
+                and secrets.compare_digest(p, APP_PASSWORD)):
+            session.clear()
+            session["user"] = APP_USERNAME
+            session.permanent = bool(remember)
+            next_url = request.args.get("next", "/")
+            if not next_url.startswith("/") or next_url.startswith("//"):
+                next_url = "/"
+            return redirect(next_url)
+        # Small delay makes brute-force annoying without hurting real UX.
+        time.sleep(0.6)
+        error = "That username or password isn't right. Try again."
+
+    return render_template_string(LOGIN_HTML, error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@require_login
 def index():
     return render_template_string(
         INDEX_HTML,
         presets=PRESETS,
         retailers=RETAILERS,
+        username=session.get("user") or "",
+        auth_enabled=AUTH_ENABLED,
     )
 
 
 @app.route("/api/run", methods=["POST"])
+@require_login
 def api_run():
     data = request.get_json(force=True)
     required = ["sitemap_url", "limit", "config"]
@@ -354,6 +439,7 @@ def api_run():
 
 
 @app.route("/api/status/<job_id>")
+@require_login
 def api_status(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
@@ -370,6 +456,7 @@ def api_status(job_id: str):
 
 
 @app.route("/api/download/<job_id>")
+@require_login
 def api_download(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
@@ -385,6 +472,232 @@ def api_download(job_id: str):
 # ---------------------------------------------------------------- #
 # HTML template                                                    #
 # ---------------------------------------------------------------- #
+
+LOGIN_HTML = r"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Sourcing</title>
+  <style>
+    :root {
+      --paper:        #F7F4EC;
+      --paper-warm:   #EDE7D6;
+      --card:         #FFFFFF;
+      --border:       #E4DECE;
+      --border-strong:#C9C0AB;
+      --ink:          #1C1B1A;
+      --graphite:     #4A4744;
+      --muted:        #857F76;
+      --brand:        #1C3E36;
+      --brand-hover:  #142B26;
+      --brand-soft:   #E8EEE9;
+      --rejected:     #9A3F2C;
+      --rejected-soft:#F0DDD5;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .stage {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    header.brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+    .brand-mark {
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--brand);
+      color: var(--paper);
+      border-radius: 3px;
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .brand-text .name {
+      font-family: "Iowan Old Style", Georgia, serif;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .brand-text .sub {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 40px 36px 32px;
+      box-shadow: 0 1px 0 rgba(28, 27, 26, 0.03),
+                  0 8px 24px rgba(28, 27, 26, 0.04);
+    }
+
+    h1.title {
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: 28px;
+      font-weight: 400;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      margin: 0 0 6px;
+    }
+    h1.title em {
+      font-style: italic;
+      color: var(--brand);
+    }
+    .subtitle {
+      color: var(--graphite);
+      font-size: 14px;
+      margin: 0 0 28px;
+    }
+
+    form { display: flex; flex-direction: column; gap: 18px; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field > label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+    }
+    .field input {
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--paper);
+      border: 1px solid var(--border-strong);
+      border-radius: 3px;
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 15px;
+      color: var(--ink);
+      transition: border-color 0.12s ease, background 0.12s ease;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: var(--brand);
+      background: #fff;
+    }
+
+    .remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--graphite);
+      cursor: pointer;
+      user-select: none;
+    }
+    .remember input {
+      width: 16px; height: 16px;
+      accent-color: var(--brand);
+      cursor: pointer;
+    }
+
+    button.submit {
+      background: var(--brand);
+      color: var(--paper);
+      border: none;
+      border-radius: 3px;
+      padding: 13px 20px;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: background 0.12s ease;
+      margin-top: 4px;
+    }
+    button.submit:hover { background: var(--brand-hover); }
+    button.submit:active { transform: translateY(1px); }
+    button.submit:focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+
+    .error {
+      background: var(--rejected-soft);
+      border: 1px solid rgba(154, 63, 44, 0.25);
+      color: var(--rejected);
+      border-radius: 3px;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin: 0 0 4px;
+    }
+
+    .footnote {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <header class="brand">
+      <div class="brand-mark">S</div>
+      <div class="brand-text">
+        <div class="name">Sourcing</div>
+        <div class="sub">Amazon FBM discovery</div>
+      </div>
+    </header>
+
+    <div class="card">
+      <h1 class="title">Welcome <em>back</em>.</h1>
+      <p class="subtitle">Sign in to continue.</p>
+
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+      <form method="post" autocomplete="on">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text"
+                 autocomplete="username" required autofocus>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password"
+                 autocomplete="current-password" required>
+        </div>
+        <label class="remember">
+          <input type="checkbox" name="remember" checked>
+          Keep me signed in for 30 days
+        </label>
+        <button type="submit" class="submit">Sign in</button>
+      </form>
+    </div>
+
+    <p class="footnote">Contact your admin if you can't sign in.</p>
+  </div>
+</body>
+</html>
+"""
+
 
 INDEX_HTML = r"""
 <!doctype html>
@@ -463,6 +776,34 @@ INDEX_HTML = r"""
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.1em;
+    }
+    .user-menu {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .user-name {
+      font-size: 13px;
+      color: var(--graphite);
+      font-weight: 500;
+    }
+    .signout {
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+      padding: 6px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 3px;
+      transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+    }
+    .signout:hover {
+      color: var(--brand);
+      border-color: var(--brand);
+      background: var(--brand-soft);
     }
 
     .hero { margin-bottom: 40px; }
@@ -1002,6 +1343,12 @@ INDEX_HTML = r"""
       <div class="name">Sourcing</div>
       <div class="sub">Amazon FBM discovery</div>
     </div>
+    {% if auth_enabled %}
+    <div class="user-menu">
+      <span class="user-name">{{ username }}</span>
+      <a class="signout" href="/logout" title="Sign out">Sign out</a>
+    </div>
+    {% endif %}
   </header>
 
   <section class="hero">

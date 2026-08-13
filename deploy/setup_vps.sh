@@ -13,8 +13,8 @@
 #
 # Usage (run as root on the VPS):
 #   KEEPA_API_KEY="your_key_here" \
-#   BASIC_AUTH_USER="client" \
-#   BASIC_AUTH_PASS="a_strong_password" \
+#   APP_USERNAME="zeshan" \
+#   APP_PASSWORD="a_strong_password" \
 #   REPO_URL="https://github.com/softonic-tech/amazon-automation.git" \
 #   bash setup_vps.sh
 #
@@ -23,8 +23,12 @@ set -euo pipefail
 
 # ---- configurable via env ---------------------------------------------------
 : "${KEEPA_API_KEY:?Set KEEPA_API_KEY before running this script}"
-: "${BASIC_AUTH_USER:?Set BASIC_AUTH_USER before running this script}"
-: "${BASIC_AUTH_PASS:?Set BASIC_AUTH_PASS before running this script}"
+# APP_USERNAME/APP_PASSWORD used to be BASIC_AUTH_USER/BASIC_AUTH_PASS. Accept
+# either name so old command-lines keep working.
+APP_USERNAME="${APP_USERNAME:-${BASIC_AUTH_USER:-}}"
+APP_PASSWORD="${APP_PASSWORD:-${BASIC_AUTH_PASS:-}}"
+: "${APP_USERNAME:?Set APP_USERNAME (login username) before running this script}"
+: "${APP_PASSWORD:?Set APP_PASSWORD (login password) before running this script}"
 REPO_URL="${REPO_URL:-https://github.com/softonic-tech/amazon-automation.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
@@ -48,7 +52,7 @@ apt-get update -y
 apt-get install -y \
     python3 python3-venv python3-pip \
     curl git \
-    nginx apache2-utils \
+    nginx \
     ufw ca-certificates
 
 echo "==> [2/7] Creating service user '$APP_USER'"
@@ -76,9 +80,19 @@ sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip
 sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 echo "==> [5/7] Writing $APP_DIR/.env"
+# Preserve SECRET_KEY across re-runs so existing sessions survive redeploys.
+EXISTING_SECRET=""
+if [[ -f "$APP_DIR/.env" ]]; then
+    EXISTING_SECRET=$(grep -E '^SECRET_KEY=' "$APP_DIR/.env" | cut -d= -f2- || true)
+fi
+SECRET_KEY="${SECRET_KEY:-${EXISTING_SECRET:-$(python3 -c 'import secrets; print(secrets.token_hex(32))')}}"
+
 install -o "$APP_USER" -g "$APP_USER" -m 0600 /dev/null "$APP_DIR/.env"
 cat > "$APP_DIR/.env" <<ENV_EOF
 KEEPA_API_KEY=$KEEPA_API_KEY
+APP_USERNAME=$APP_USERNAME
+APP_PASSWORD=$APP_PASSWORD
+SECRET_KEY=$SECRET_KEY
 PORT=5000
 ENV_EOF
 chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
@@ -100,10 +114,9 @@ fi
 ln -sf /etc/nginx/sites-available/amazon-sourcing /etc/nginx/sites-enabled/amazon-sourcing
 rm -f /etc/nginx/sites-enabled/default
 
-# Basic-auth credentials.
-htpasswd -bc /etc/nginx/.htpasswd "$BASIC_AUTH_USER" "$BASIC_AUTH_PASS"
-chmod 640 /etc/nginx/.htpasswd
-chown root:www-data /etc/nginx/.htpasswd
+# Remove any old htpasswd file from previous versions of this script — auth
+# now lives in the Flask app, not in nginx.
+rm -f /etc/nginx/.htpasswd
 
 nginx -t
 
@@ -140,8 +153,8 @@ cat <<DONE
 ============================================================
   Amazon Sourcing Tool is deployed.
   URL:       $URL
-  Username:  $BASIC_AUTH_USER
-  Password:  (the one you passed via BASIC_AUTH_PASS)
+  Username:  $APP_USERNAME
+  Password:  (the one you passed via APP_PASSWORD)
 
   Handy commands:
     systemctl status amazon-sourcing
