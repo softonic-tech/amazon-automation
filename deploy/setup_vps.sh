@@ -51,9 +51,42 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y \
     python3 python3-venv python3-pip \
-    curl git \
+    curl git tar \
     nginx \
     ufw ca-certificates
+
+# curl-impersonate: statically-linked curl that mimics Chrome/Firefox TLS
+# fingerprint. Needed to beat Cloudflare Bot Fight Mode from datacenter IPs
+# (Hostinger, DigitalOcean, etc.). Without it, sites like iHerb 403 every
+# request from the VPS even though the same code works from a residential IP.
+CURL_IMP_VERSION="${CURL_IMP_VERSION:-v1.5.6}"
+if ! command -v curl-impersonate &>/dev/null; then
+    echo "    installing curl-impersonate $CURL_IMP_VERSION"
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  TARBALL="curl-impersonate-$CURL_IMP_VERSION.x86_64-linux-gnu.tar.gz" ;;
+        aarch64) TARBALL="curl-impersonate-$CURL_IMP_VERSION.aarch64-linux-gnu.tar.gz" ;;
+        *) echo "    unknown arch $ARCH, skipping curl-impersonate"; TARBALL="" ;;
+    esac
+    if [[ -n "$TARBALL" ]]; then
+        TMPDIR=$(mktemp -d)
+        curl -fsSL -o "$TMPDIR/curl-imp.tar.gz" \
+            "https://github.com/lexiforest/curl-impersonate/releases/download/$CURL_IMP_VERSION/$TARBALL"
+        tar -xzf "$TMPDIR/curl-imp.tar.gz" -C "$TMPDIR"
+        # v1.x layout: single statically-linked `curl-impersonate` binary
+        # plus per-browser wrapper scripts. Install everything to /usr/local/bin.
+        find "$TMPDIR" -maxdepth 2 -type f \( -name 'curl-impersonate' -o -name 'curl_chrome*' -o -name 'curl_ff*' -o -name 'curl_safari*' -o -name 'curl_edge*' \) \
+            -exec install -m 0755 {} /usr/local/bin/ \;
+        rm -rf "$TMPDIR"
+        if command -v curl-impersonate &>/dev/null; then
+            echo "    curl-impersonate installed: $(curl-impersonate --version | head -1)"
+        else
+            echo "    WARNING: curl-impersonate install didn't drop a binary — check tarball layout"
+        fi
+    fi
+else
+    echo "    curl-impersonate already present: $(curl-impersonate --version | head -1)"
+fi
 
 echo "==> [2/7] Creating service user '$APP_USER'"
 if ! id "$APP_USER" &>/dev/null; then

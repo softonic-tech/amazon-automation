@@ -31,6 +31,7 @@ Same interface as HttpClient / PlaywrightClient:
 from __future__ import annotations
 
 import logging
+import os
 import random
 import shutil
 import subprocess
@@ -48,6 +49,40 @@ DEFAULT_UA = (
     "Chrome/151.0.0.0 Safari/537.36"
 )
 
+# curl-impersonate wrapper scripts (v0.x style) to try in preference order.
+# The v1.x line ships a single `curl-impersonate` binary that takes
+# `--impersonate <profile>`; we detect that separately below.
+IMPERSONATE_WRAPPERS = (
+    "curl_chrome136", "curl_chrome131", "curl_chrome124",
+    "curl_chrome120", "curl_chrome116",
+    "curl_ff135", "curl_ff117",
+)
+IMPERSONATE_PROFILE = os.environ.get("CURL_IMPERSONATE_PROFILE", "chrome131")
+
+
+def _detect_curl_binary() -> tuple[str, list[str], bool]:
+    """Prefer curl-impersonate if installed — its Chrome/Firefox TLS
+    fingerprint beats Cloudflare Bot Fight Mode from datacenter IPs where
+    system curl gets 403'd. Falls back to system curl.
+
+    Returns (binary_path, extra_args_before_url, is_impersonating).
+    """
+    single = shutil.which("curl-impersonate") or shutil.which("curl_impersonate")
+    if single:
+        return single, ["--impersonate", IMPERSONATE_PROFILE], True
+    for name in IMPERSONATE_WRAPPERS:
+        p = shutil.which(name)
+        if p:
+            return p, [], True
+    p = shutil.which("curl") or shutil.which("curl.exe")
+    if not p:
+        raise RuntimeError(
+            "No curl binary found on PATH. Install curl "
+            "(apt install curl) or curl-impersonate "
+            "(https://github.com/lexiforest/curl-impersonate)."
+        )
+    return p, [], False
+
 
 class CurlClient:
     """
@@ -56,6 +91,11 @@ class CurlClient:
 
     Session state (cookies) is persisted via curl's cookie jar file so that
     Cloudflare's clearance cookies stick across requests.
+
+    Auto-detects curl-impersonate when installed and uses it (needed to beat
+    Cloudflare Bot Fight from datacenter IPs on sites like iHerb). Also reads
+    an optional `HTTP_PROXY_URL` env var to route requests through a
+    residential proxy (fallback if IP reputation alone still 403s).
     """
 
     def __init__(
@@ -63,29 +103,35 @@ class CurlClient:
         delay: float = 2.0,
         timeout: int = 30,
         respect_robots: bool = True,
+        proxy: str | None = None,
     ) -> None:
-        # Verify curl is available
-        curl_bin = shutil.which("curl") or shutil.which("curl.exe")
-        if not curl_bin:
-            raise RuntimeError(
-                "curl not found on PATH. Windows 10 build 1803+ ships with "
-                "curl.exe. On older systems: https://curl.se/windows/. "
-                "Linux: apt install curl. Mac: curl is preinstalled."
-            )
-        self._curl = curl_bin
+        self._curl, self._impersonate_args, self._impersonating = _detect_curl_binary()
 
         try:
             v = subprocess.run(
                 [self._curl, "--version"],
                 capture_output=True, timeout=5, check=True, text=True,
             )
-            log.info("curl ready: %s", v.stdout.splitlines()[0])
+            mode = "impersonate" if self._impersonating else "system"
+            log.info("curl ready (%s): %s", mode, v.stdout.splitlines()[0])
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             raise RuntimeError(f"curl exists but failed to run: {e}") from e
 
         self.delay = delay
         self.timeout = timeout
         self.respect_robots = respect_robots
+        # Explicit `proxy=` arg wins over env vars. Common names supported:
+        # HTTP_PROXY_URL (our own), HTTPS_PROXY, HTTP_PROXY.
+        self._proxy = (
+            proxy
+            or os.environ.get("HTTP_PROXY_URL")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or None
+        )
+        if self._proxy:
+            log.info("curl proxy in use (host redacted)")
+
         self._robots_cache: dict[str, RobotFileParser] = {}
         self._last_request = 0.0
         self._extra_headers: dict[str, str] = {}
@@ -154,23 +200,38 @@ class CurlClient:
         default_referer = f"{parsed.scheme}://{parsed.netloc}/"
         referer = self._extra_headers.get("Referer", default_referer)
 
-        cmd = [
+        cmd: list[str] = [
             self._curl,
-            "-L",                    # follow redirects
-            "--compressed",          # accept gzip/br transport encoding
+            *self._impersonate_args,   # e.g. ["--impersonate", "chrome131"]
+            "-L",                      # follow redirects
+            "--compressed",            # accept gzip/br transport encoding
             "--silent",
             "--show-error",
             "-o", str(output_path),
-            "-A", DEFAULT_UA,
-            "-H", ("Accept: text/html,application/xhtml+xml,"
-                   "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
-            "-H", "Accept-Language: en-US,en;q=0.9",
-            "-H", f"Referer: {referer}",
-            "-H", "Cache-Control: no-cache",
             "-b", str(self._cookie_jar),   # read cookies
             "-c", str(self._cookie_jar),   # write cookies back
             "--max-time", str(self.timeout),
         ]
+
+        # curl-impersonate injects its own UA, Accept, Accept-Language,
+        # sec-ch-*, sec-fetch-* headers to match the real browser it mimics.
+        # Overriding them here would defeat the fingerprint match, so we only
+        # add browser-y headers when running plain curl.
+        if not self._impersonating:
+            cmd += [
+                "-A", DEFAULT_UA,
+                "-H", ("Accept: text/html,application/xhtml+xml,"
+                       "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
+                "-H", "Accept-Language: en-US,en;q=0.9",
+                "-H", "Cache-Control: no-cache",
+            ]
+
+        # Referer is per-request and safe to set even when impersonating.
+        cmd += ["-H", f"Referer: {referer}"]
+
+        # Route through a proxy (e.g. residential IP pool) when configured.
+        if self._proxy:
+            cmd += ["-x", self._proxy]
 
         # Inline cookies from set_cookie() — combines with jar
         if self._extra_cookies:
@@ -182,7 +243,7 @@ class CurlClient:
             if name.lower() != "referer":
                 cmd += ["-H", f"{name}: {value}"]
 
-        # Write HTTP status code to stderr so we can capture it
+        # Write HTTP status code to stdout so we can capture it
         cmd += ["-w", "%{http_code}"]
         cmd.append(url)
         return cmd
