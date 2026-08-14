@@ -113,7 +113,7 @@ PRESETS = {
             "min_profit": 2, "min_margin": 0.10, "min_roi": 0.15,
             "min_fbm_sellers": 4, "min_rating": 3.5, "min_reviews": 0,
             "require_rating": False, "require_reviews": False,
-            "reject_if_amazon_on_listing": True, "max_bsr": 0,
+            "reject_if_amazon_on_listing": False, "max_bsr": 0,
             "min_historical_sellers": 0,
         },
     },
@@ -125,7 +125,7 @@ PRESETS = {
             "min_profit": 0.01, "min_margin": 0, "min_roi": 0,
             "min_fbm_sellers": 0, "min_rating": 0, "min_reviews": 0,
             "require_rating": False, "require_reviews": False,
-            "reject_if_amazon_on_listing": True, "max_bsr": 0,
+            "reject_if_amazon_on_listing": False, "max_bsr": 0,
             "min_historical_sellers": 0,
         },
     },
@@ -137,7 +137,7 @@ PRESETS = {
             "min_profit": 5, "min_margin": 0.15, "min_roi": 0.25,
             "min_fbm_sellers": 4, "min_rating": 4.0, "min_reviews": 50,
             "require_rating": True, "require_reviews": True,
-            "reject_if_amazon_on_listing": True, "max_bsr": 100000,
+            "reject_if_amazon_on_listing": False, "max_bsr": 100000,
             "min_historical_sellers": 5,
         },
     },
@@ -1377,20 +1377,6 @@ INDEX_HTML = r"""
 
         <div class="fieldset">
           <div class="field">
-            <label for="min_supplier_price">Min supplier price ($)</label>
-            <input type="number" id="min_supplier_price" step="0.01" value="0" min="0">
-            <div class="field-hint">iHerb: use 25 for free shipping. Zoro: usually 0.</div>
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <div class="field-hint" style="padding-top: 8px;">
-              Tool oversamples the sitemap 3× and keeps only products above this price.
-            </div>
-          </div>
-        </div>
-
-        <div class="fieldset">
-          <div class="field">
             <label for="brands">Focus on brands (optional)</label>
             <input type="text" id="brands" placeholder='e.g., "Now Foods, Jarrow Formulas"'>
             <div class="field-hint">Comma-separated. Only products from these brands.</div>
@@ -1460,10 +1446,6 @@ INDEX_HTML = r"""
               <input type="number" id="fee_pct" value="15">
             </div>
 
-            <div class="adv-check" style="grid-column: 1 / -1;">
-              <input type="checkbox" id="reject_if_amazon_on_listing" checked>
-              <label for="reject_if_amazon_on_listing">Reject if Amazon is on the listing</label>
-            </div>
             <div class="adv-check" style="grid-column: 1 / -1;">
               <input type="checkbox" id="require_rating">
               <label for="require_rating">Require rating (reject if no rating at all)</label>
@@ -1577,7 +1559,6 @@ function applyPreset(key) {
   set("max_bsr", v.max_bsr);
   document.getElementById("require_rating").checked = v.require_rating;
   document.getElementById("require_reviews").checked = v.require_reviews;
-  document.getElementById("reject_if_amazon_on_listing").checked = v.reject_if_amazon_on_listing;
 }
 function set(id, val) { document.getElementById(id).value = val; }
 
@@ -1592,7 +1573,7 @@ function buildConfig() {
     min_roi: val("min_roi") / 100,
     min_fbm_sellers: parseInt(val("min_fbm_sellers")) || 0,
     min_historical_sellers: parseInt(val("min_historical_sellers")) || 0,
-    reject_if_amazon_on_listing: chk("reject_if_amazon_on_listing"),
+    reject_if_amazon_on_listing: false,
     min_rating: val("min_rating"),
     require_rating: chk("require_rating"),
     min_reviews: parseInt(val("min_reviews")) || 0,
@@ -1613,12 +1594,10 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
   document.querySelectorAll(".stage").forEach(s => s.classList.remove("done", "active"));
 
   const config = buildConfig();
-  config.min_supplier_price = parseFloat(document.getElementById("min_supplier_price").value) || 0;
 
   const payload = {
     sitemap_url: document.getElementById("retailer").value,
     limit: parseInt(document.getElementById("limit").value),
-    min_supplier_price: config.min_supplier_price,
     brands: document.getElementById("brands").value.trim(),
     random: true,
     no_robots: true,
@@ -1639,16 +1618,6 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
     showError(err.message);
     btn.disabled = false;
     btn.textContent = "Start analysis";
-  }
-});
-
-// Auto-suggest min price = $25 when iHerb is selected
-document.getElementById("retailer").addEventListener("change", (e) => {
-  const priceInput = document.getElementById("min_supplier_price");
-  if (e.target.value.includes("iherb")) {
-    if (parseFloat(priceInput.value) === 0) priceInput.value = "25";
-  } else {
-    if (parseFloat(priceInput.value) === 25) priceInput.value = "0";
   }
 });
 
