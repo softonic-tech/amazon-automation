@@ -42,9 +42,50 @@ from sourcing import SourcingConfig, build_sourcing_rows, save_sourcing_xlsx, sa
 from dataclasses import asdict
 
 # Optional clients — only imported when actually used
+def _brand_to_url_slugs(brand: str) -> list[str]:
+    """Return every URL-slug variant iHerb might use for this brand name.
+
+    iHerb's actual convention (verified from real product URLs like
+    ``/pr/doctor-s-best-msm-...`` and ``/pr/nature-s-way-...``):
+      * spaces        → hyphen
+      * apostrophe    → hyphen  (kept as a separator, NOT stripped)
+      * ``&``         → ``and``
+      * ``.``, ``,``  → dropped
+      * runs of hyphens collapsed to a single hyphen
+
+    Because retailers aren't 100% consistent, we also emit an
+    apostrophe-stripped fallback (``Nature's Path`` → ``natures-path``) so
+    older or inconsistently-slugged URLs still match.
+    """
+    if not brand:
+        return []
+
+    def _collapse(s: str) -> str:
+        s = s.strip().lower().replace("&", "and")
+        for ch in (".", ","):
+            s = s.replace(ch, "")
+        s = s.replace(" ", "-")
+        while "--" in s:
+            s = s.replace("--", "-")
+        return s.strip("-")
+
+    variants: list[str] = []
+    # Primary: iHerb convention — apostrophe becomes a hyphen separator.
+    primary = _collapse(brand.replace("'", "-").replace("\u2019", "-"))
+    if primary:
+        variants.append(primary)
+    # Fallback: apostrophe stripped entirely.
+    if "'" in brand or "\u2019" in brand:
+        stripped = _collapse(brand.replace("'", "").replace("\u2019", ""))
+        if stripped and stripped not in variants:
+            variants.append(stripped)
+    return variants
+
+
+# Kept for backwards compatibility with anything that imported the old name.
 def _brand_to_url_slug(brand: str) -> str:
-    """Convert 'Now Foods' → 'now-foods' for URL slug matching."""
-    return brand.strip().lower().replace(" ", "-").replace("'", "").replace("&", "and")
+    variants = _brand_to_url_slugs(brand)
+    return variants[0] if variants else ""
 
 
 def _prefilter_urls_by_brand(urls: list[str], brand_include: list[str],
@@ -60,10 +101,19 @@ def _prefilter_urls_by_brand(urls: list[str], brand_include: list[str],
     if "iherb.com" not in base_host.lower():
         return urls, 0
 
-    slugs = [_brand_to_url_slug(b) for b in brand_include]
+    # Flatten: every brand may produce several candidate slugs.
+    slugs: list[str] = []
+    for b in brand_include:
+        slugs.extend(_brand_to_url_slugs(b))
+    # De-dupe while preserving order.
+    seen: set[str] = set()
+    slugs = [s for s in slugs if not (s in seen or seen.add(s))]
+    logging.getLogger("scraper").info(
+        "Brand URL slugs to match: %s", ", ".join(slugs) or "(none)"
+    )
+
     kept = []
     for url in urls:
-        # Extract the slug portion after /pr/
         url_lower = url.lower()
         if any(f"/pr/{s}-" in url_lower or f"/pr/{s}/" in url_lower for s in slugs):
             kept.append(url)
@@ -86,17 +136,35 @@ def _to_price(v) -> float | None:
         return None
 
 
+def _normalize_brand_for_compare(s: str) -> str:
+    """Lowercase + strip punctuation + collapse whitespace so ``Bob's Red Mill``
+    and ``Bobs Red Mill`` compare equal (retailers aren't consistent about
+    apostrophes in JSON-LD).
+
+    Note: apostrophes are stripped, NOT converted to whitespace, so
+    ``Bob's`` and ``Bobs`` both become ``bobs``.
+    """
+    if not s:
+        return ""
+    s = s.lower().replace("&", "and").replace("\u2019", "'")
+    s = s.replace("'", "")  # strip apostrophes so "bob's" == "bobs"
+    # Turn any remaining non-alnum char into a space, then collapse.
+    cleaned = "".join(c if (c.isalnum() or c == " ") else " " for c in s)
+    return " ".join(cleaned.split())
+
+
 def _matches_brand_filter(product_dict: dict, include: list[str],
                            exclude: list[str]) -> bool:
-    """Return True if the product's brand passes the include/exclude lists."""
-    brand = (product_dict.get("brand") or "").lower()
+    """Return True if the product's brand passes the include/exclude lists.
+    Comparison is punctuation- and case-insensitive."""
+    brand = _normalize_brand_for_compare(product_dict.get("brand") or "")
     if not brand:
         return False if include else True
     if include:
-        if not any(inc.lower() in brand for inc in include):
+        if not any(_normalize_brand_for_compare(inc) in brand for inc in include):
             return False
     if exclude:
-        if any(exc.lower() in brand for exc in exclude):
+        if any(_normalize_brand_for_compare(exc) in brand for exc in exclude):
             return False
     return True
 
