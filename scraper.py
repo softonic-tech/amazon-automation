@@ -939,6 +939,29 @@ def _run(args, client) -> None:
                 max_sm = 300
             else:
                 max_sm = 20
+
+            # When brand filter is active on iHerb, apply it INSIDE the
+            # crawler so it keeps walking sitemaps until it has enough
+            # brand-matching URLs — not just enough total URLs. Without this,
+            # niche brands starve because they represent <1% of iHerb's
+            # catalog and the target_pool fills up with unrelated URLs.
+            url_filter = None
+            from urllib.parse import urlparse as _urlp
+            host = _urlp(args.sitemap).netloc.lower()
+            if brand_include and "iherb.com" in host:
+                all_slugs: list[str] = []
+                for b in brand_include:
+                    all_slugs.extend(_brand_to_url_slugs(b))
+                # De-dup preserving order.
+                _seen: set[str] = set()
+                all_slugs = [s for s in all_slugs if not (s in _seen or _seen.add(s))]
+                log.info("In-crawl brand filter active; slugs: %s",
+                         ", ".join(all_slugs))
+                def url_filter(u: str, _slugs=tuple(all_slugs)) -> bool:
+                    ul = u.lower()
+                    return any(f"/pr/{s}-" in ul or f"/pr/{s}/" in ul
+                               for s in _slugs)
+
             log.info("Crawling up to %d sitemap file(s)%s",
                      max_sm,
                      " (bumped for brand-narrow query)" if brand_include and args.max_sitemaps is None else "")
@@ -948,6 +971,7 @@ def _run(args, client) -> None:
                 limit=target_limit,
                 pattern=args.pattern,
                 sample_random=args.random,
+                url_filter=url_filter,
             )
             if not urls:
                 log.error("No product URLs found.")

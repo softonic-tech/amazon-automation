@@ -19,6 +19,7 @@ import gzip
 import logging
 import random
 import re
+from typing import Callable
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 
@@ -61,6 +62,7 @@ class SitemapCrawler:
         pattern: str | None = None,
         sample_random: bool = False,
         pool_multiplier: int = 10,
+        url_filter: Callable[[str], bool] | None = None,
     ) -> list[str]:
         """
         Return up to `limit` product URLs from the site.
@@ -70,6 +72,14 @@ class SitemapCrawler:
                           If False, return the first `limit` matches.
         `pool_multiplier` — when sampling randomly, collect this many × limit
                             candidates before sampling (for variety).
+        `url_filter` — optional callback applied to every candidate URL. Only
+                       URLs where ``url_filter(url) is True`` count toward
+                       `limit`. Critical for narrow brand queries: without it,
+                       the crawler stops at `limit` URLs total, even if none
+                       of them match the caller's downstream brand filter.
+                       With it, the crawler keeps digging through sitemap
+                       files until it has `limit` matching URLs (or exhausts
+                       ``max_sitemaps``).
         """
         host = urlparse(base_url).netloc.replace("www.", "")
         pattern = pattern or self.DEFAULT_PATTERNS.get(host)
@@ -89,7 +99,9 @@ class SitemapCrawler:
         for sm_url in sitemap_urls:
             if len(collected) >= target_pool:
                 break
-            collected.extend(self._walk(sm_url, regex, target_pool - len(collected)))
+            collected.extend(self._walk(
+                sm_url, regex, target_pool - len(collected), url_filter=url_filter,
+            ))
 
         # Deduplicate while preserving order
         seen: set[str] = set()
@@ -99,7 +111,8 @@ class SitemapCrawler:
                 seen.add(u)
                 unique.append(u)
 
-        log.info("Collected %d matching product URL(s) from sitemaps", len(unique))
+        log.info("Collected %d matching product URL(s) from %d sitemap file(s)",
+                 len(unique), len(self._visited))
 
         if sample_random and len(unique) > limit:
             return random.sample(unique, limit)
@@ -127,6 +140,7 @@ class SitemapCrawler:
         regex: re.Pattern | None,
         need: int,
         depth: int = 0,
+        url_filter: Callable[[str], bool] | None = None,
     ) -> list[str]:
         """
         Recurse through a sitemap or sitemap index.
@@ -164,17 +178,22 @@ class SitemapCrawler:
             for child in child_urls:
                 if len(found) >= need:
                     break
-                found.extend(self._walk(child, regex, need - len(found), depth + 1))
+                found.extend(self._walk(
+                    child, regex, need - len(found), depth + 1, url_filter=url_filter,
+                ))
 
         elif tag.endswith("urlset"):
             for loc in root.findall("sm:url/sm:loc", SITEMAP_NS):
                 if loc.text is None:
                     continue
                 u = loc.text.strip()
-                if regex is None or regex.search(u):
-                    found.append(u)
-                    if len(found) >= need:
-                        break
+                if regex is not None and not regex.search(u):
+                    continue
+                if url_filter is not None and not url_filter(u):
+                    continue
+                found.append(u)
+                if len(found) >= need:
+                    break
 
         else:
             log.warning("Unexpected root tag %r in %s", root.tag, url)
