@@ -708,6 +708,11 @@ Examples:
     sm.add_argument("--pattern", help="Regex to filter product URLs (overrides host default)")
     sm.add_argument("--urls-only", action="store_true",
                     help="Just discover and save URLs — don't scrape them")
+    sm.add_argument("--max-sitemaps", type=int, default=None,
+                    help="Max number of sitemap files to crawl (default: 20 for "
+                         "normal runs, 300 when --brands is set — narrow brand "
+                         "queries need a much deeper crawl to surface niche "
+                         "brands buried in later sitemap files)")
 
     amz = ap.add_argument_group("Amazon comparison")
     amz.add_argument("--compare-amazon", action="store_true",
@@ -925,7 +930,19 @@ def _run(args, client) -> None:
         target_limit = args.limit * oversample_mult
 
         if args.sitemap:
-            crawler = SitemapCrawler(client)
+            # Narrow brand queries need to crawl many more sitemap files —
+            # niche brands like "Bob's Red Mill" often live past the first
+            # 20 sub-sitemaps. URL pre-filtering makes deeper crawling cheap.
+            if args.max_sitemaps is not None:
+                max_sm = args.max_sitemaps
+            elif brand_include:
+                max_sm = 300
+            else:
+                max_sm = 20
+            log.info("Crawling up to %d sitemap file(s)%s",
+                     max_sm,
+                     " (bumped for brand-narrow query)" if brand_include and args.max_sitemaps is None else "")
+            crawler = SitemapCrawler(client, max_sitemaps=max_sm)
             urls = crawler.collect_urls(
                 base_url=args.sitemap,
                 limit=target_limit,
