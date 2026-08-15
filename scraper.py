@@ -38,7 +38,13 @@ from bs4 import BeautifulSoup
 
 from sitemap import SitemapCrawler
 from amazon import AmazonSearcher, compare_zoro_to_amazon, ComparisonRow
-from sourcing import SourcingConfig, build_sourcing_rows, save_sourcing_xlsx, save_sourcing_csv
+from sourcing import (
+    SourcingConfig,
+    build_sourcing_rows,
+    is_out_of_stock,
+    save_sourcing_xlsx,
+    save_sourcing_csv,
+)
 from dataclasses import asdict
 
 # Optional clients — only imported when actually used
@@ -86,6 +92,116 @@ def _brand_to_url_slugs(brand: str) -> list[str]:
 def _brand_to_url_slug(brand: str) -> str:
     variants = _brand_to_url_slugs(brand)
     return variants[0] if variants else ""
+
+
+_IHERB_PR_HREF = re.compile(
+    r'href="(?:https?://(?:[a-z0-9-]+\.)?iherb\.com)?(/pr/[^"/?#]+/\d+)"',
+    re.I,
+)
+_IHERB_AVAILABLE = re.compile(
+    r"availableToPurchase\s*:\s*\"?(True|False)\"?",
+    re.I,
+)
+_IHERB_STCK = re.compile(r'stckInd\s*:\s*"([^"]+)"')
+
+
+def _iherb_origin(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc or "www.iherb.com"
+    return f"{scheme}://{netloc}"
+
+
+def _extract_iherb_product_paths(html: str) -> list[str]:
+    """Product paths from listing-page hrefs only (avoids related-item JS noise)."""
+    seen: list[str] = []
+    for m in _IHERB_PR_HREF.finditer(html or ""):
+        path = m.group(1)
+        if path not in seen:
+            seen.append(path)
+    return seen
+
+
+def _collect_iherb_brand_listing_urls(
+    client,
+    base_url: str,
+    brands: list[str],
+    limit: int,
+    in_stock_only: bool = True,
+    sample_random: bool = False,
+    max_pages: int = 40,
+) -> list[str]:
+    """
+    Collect iHerb product URLs from brand listing pages.
+
+    iHerb's own 'In stock' checkbox is ``?soa=true`` (show only available).
+    Using that with ``/c/{brand-slug}`` means we never even enqueue OOS URLs
+    when the user is hunting a brand.
+    """
+    origin = _iherb_origin(base_url)
+    collected: list[str] = []
+    seen: set[str] = set()
+    pool_target = limit
+
+    for brand in brands:
+        slugs = _brand_to_url_slugs(brand)
+        listing_slug = None
+        page1_html = None
+        for slug in slugs:
+            params = "soa=true" if in_stock_only else ""
+            url = f"{origin}/c/{slug}" + (f"?{params}" if params else "")
+            html = client.get(url)
+            paths = _extract_iherb_product_paths(html or "")
+            if html and paths:
+                listing_slug = slug
+                page1_html = html
+                log.info(
+                    "iHerb brand listing: %s → %s (%d products on page 1, soa=%s)",
+                    brand, url, len(paths), in_stock_only,
+                )
+                break
+        if not listing_slug:
+            log.warning(
+                "No iHerb listing page for brand %r (tried /c/%s)",
+                brand, ", /c/".join(slugs) or "(no slugs)",
+            )
+            continue
+
+        for page in range(1, max_pages + 1):
+            if page == 1:
+                html = page1_html or ""
+            else:
+                qs = []
+                if in_stock_only:
+                    qs.append("soa=true")
+                qs.append(f"p={page}")
+                html = client.get(f"{origin}/c/{listing_slug}?{'&'.join(qs)}") or ""
+            paths = _extract_iherb_product_paths(html)
+            if not paths:
+                break
+            new = 0
+            for path in paths:
+                full = origin + path
+                if full in seen:
+                    continue
+                seen.add(full)
+                collected.append(full)
+                new += 1
+            if new == 0:
+                break
+            if len(collected) >= pool_target:
+                break
+        if len(collected) >= pool_target:
+            break
+
+    if sample_random and len(collected) > limit:
+        random.shuffle(collected)
+    collected = collected[:limit]
+    log.info(
+        "iHerb brand listing collected %d URL(s) (in-stock filter %s)",
+        len(collected), "ON" if in_stock_only else "OFF",
+    )
+    return collected
 
 
 def _prefilter_urls_by_brand(urls: list[str], brand_include: list[str],
@@ -356,6 +472,7 @@ class ProductParser:
             "brand": "[data-za='product-brand'], .product-brand",
             "description": "[data-za='product-description'], .product-description",
             "specs_row": "table.specs tr, .product-specs tr, [class*='spec'] tr",
+            "availability": "[itemprop='availability'], [data-za='availability']",
         },
         "iherb.com": {
             # JSON-LD covers most of this reliably; these are HTML fallbacks
@@ -368,6 +485,9 @@ class ProductParser:
             "specs_row":   "#product-specs-list li, "
                            ".product-specs-list li, "
                            "table.product-details tr",
+            "availability": "[itemprop='availability'], "
+                            "[data-testid='stock-status'], "
+                            ".stock-status, #stock-status",
         },
         # Add other retailers here.
     }
@@ -376,25 +496,63 @@ class ProductParser:
         soup = BeautifulSoup(html, "html.parser")
         product = Product(url=url)
 
-        # 1. JSON-LD (most reliable)
+        # 1. JSON-LD (most reliable generic source)
         jsonld_blocks = self._extract_jsonld(soup)
         product.raw_jsonld = jsonld_blocks
         self._apply_jsonld(product, jsonld_blocks)
 
+        # 1b. iHerb buy-button flags beat JSON-LD when present
+        if "iherb.com" in url.lower():
+            self._apply_iherb_stock(product, html)
+
         # 2. OpenGraph fallbacks
         self._apply_opengraph(product, soup)
 
-        # 3. Site-specific selectors
+        # 3. Site-specific selectors (match subdomains like pk.iherb.com)
         host = urlparse(url).netloc.replace("www.", "")
-        selectors = self.SITE_SELECTORS.get(host, {})
+        selectors = self._selectors_for_host(host)
         self._apply_selectors(product, soup, selectors)
 
         # 4. Breadcrumbs (generic)
         product.breadcrumbs = self._extract_breadcrumbs(soup)
 
+        # 5. Microdata availability fallback (schema.org itemprop)
+        if not product.availability:
+            tag = soup.find(attrs={"itemprop": "availability"})
+            if tag:
+                href = tag.get("href") or tag.get("content") or tag.get_text(strip=True)
+                if href:
+                    product.availability = str(href).split("/")[-1] or None
+
         return product
 
     # --- helpers ---------------------------------------------------------- #
+
+    @staticmethod
+    def _selectors_for_host(host: str) -> dict[str, str]:
+        host = (host or "").replace("www.", "").lower()
+        if host in ProductParser.SITE_SELECTORS:
+            return ProductParser.SITE_SELECTORS[host]
+        for key, sel in ProductParser.SITE_SELECTORS.items():
+            if host.endswith(key):
+                return sel
+        return {}
+
+    @staticmethod
+    def _apply_iherb_stock(product: Product, html: str) -> None:
+        """iHerb's real stock flag is window.PRODUCT_DETAILS.availableToPurchase
+        (and IHR_DL.product.stckInd). JSON-LD usually matches, but the buy
+        button is the source of truth for whether we can actually source it.
+        """
+        atp = _IHERB_AVAILABLE.search(html or "")
+        if atp:
+            product.availability = (
+                "InStock" if atp.group(1).lower() == "true" else "OutOfStock"
+            )
+            return
+        stck = _IHERB_STCK.search(html or "")
+        if stck:
+            product.availability = stck.group(1)
 
     @staticmethod
     def _extract_jsonld(soup: BeautifulSoup) -> list[dict]:
@@ -482,6 +640,10 @@ class ProductParser:
         product.image = product.image or og("og:image")
         product.price = product.price or og("product:price:amount")
         product.currency = product.currency or og("product:price:currency")
+        if not product.availability:
+            avail = og("product:availability") or og("og:availability")
+            if avail:
+                product.availability = str(avail).split("/")[-1]
 
     def _apply_selectors(
         self, product: Product, soup: BeautifulSoup, selectors: dict[str, str]
@@ -499,6 +661,22 @@ class ProductParser:
         product.brand = product.brand or first_text(selectors.get("brand", ""))
         product.sku = product.sku or first_text(selectors.get("sku", ""))
         product.description = product.description or first_text(selectors.get("description", ""))
+
+        if not product.availability:
+            avail_sel = selectors.get("availability", "")
+            if avail_sel:
+                for sel in avail_sel.split(","):
+                    el = soup.select_one(sel.strip())
+                    if not el:
+                        continue
+                    raw = (
+                        el.get("href")
+                        or el.get("content")
+                        or el.get_text(strip=True)
+                    )
+                    if raw:
+                        product.availability = str(raw).split("/")[-1]
+                        break
 
         if not product.price:
             raw = first_text(selectors.get("price", ""))
@@ -748,6 +926,9 @@ Examples:
     src2.add_argument("--exclude-brands", type=str, default=None,
                       help='Comma-separated brands to EXCLUDE, e.g. "Now Foods". '
                            "Applied after --brands filter.")
+    src2.add_argument("--include-oos", action="store_true",
+                      help="Include out-of-stock supplier products (default: skip "
+                           "them during hunting and reject them at approval).")
 
     # Profitability filters
     src2.add_argument("--min-profit", type=float, default=None,
@@ -911,100 +1092,137 @@ def _run(args, client) -> None:
             ]
             log.info("Filtered by min supplier price $%.2f: %d → %d products",
                      min_price, before, len(product_dicts))
+        if not args.include_oos:
+            before = len(product_dicts)
+            product_dicts = [
+                p for p in product_dicts if not is_out_of_stock(p.get("availability"))
+            ]
+            dropped = before - len(product_dicts)
+            if dropped:
+                log.info("Excluded %d out-of-stock product(s): %d remain",
+                         dropped, len(product_dicts))
     else:
         # Parse filter args
         min_price = args.min_supplier_price or 0.0
         brand_include = _split_csv_arg(args.brands)
         brand_exclude = _split_csv_arg(args.exclude_brands)
-        any_filter = bool(min_price or brand_include or brand_exclude)
+        require_in_stock = not args.include_oos
+        any_filter = bool(min_price or brand_include or brand_exclude or require_in_stock)
 
         # Oversample multiplier — scale with filter aggressiveness.
         # Brand filter pre-drops 80-90% of URLs (for iHerb), so we need
-        # a much larger initial pool.
+        # a much larger initial pool. In-stock filtering also burns some
+        # URLs, so even a "no other filters" run oversamples 2x.
         if brand_include:
             oversample_mult = 30
         elif min_price > 0:
             oversample_mult = 3
+        elif require_in_stock:
+            oversample_mult = 2
         else:
             oversample_mult = 1
         target_limit = args.limit * oversample_mult
 
         if args.sitemap:
-            # Narrow brand queries need to crawl many more sitemap files —
-            # niche brands like "Bob's Red Mill" often live past the first
-            # 20 sub-sitemaps. URL pre-filtering makes deeper crawling cheap.
-            if args.max_sitemaps is not None:
-                max_sm = args.max_sitemaps
-            elif brand_include:
-                max_sm = 300
-            else:
-                max_sm = 20
-
-            # When brand filter is active on iHerb, apply it INSIDE the
-            # crawler so it keeps walking sitemaps until it has enough
-            # brand-matching URLs — not just enough total URLs. Without this,
-            # niche brands starve because they represent <1% of iHerb's
-            # catalog and the target_pool fills up with unrelated URLs.
-            url_filter = None
             from urllib.parse import urlparse as _urlp
             host = _urlp(args.sitemap).netloc.lower()
+            urls: list[str] = []
+
+            # iHerb + brand hunt: pull from /c/{brand}?soa=true (iHerb's own
+            # "In stock" checkbox) instead of walking the whole sitemap.
             if brand_include and "iherb.com" in host:
-                all_slugs: list[str] = []
-                for b in brand_include:
-                    all_slugs.extend(_brand_to_url_slugs(b))
-                # De-dup preserving order.
-                _seen: set[str] = set()
-                all_slugs = [s for s in all_slugs if not (s in _seen or _seen.add(s))]
-                log.info("In-crawl brand filter active; slugs: %s",
-                         ", ".join(all_slugs))
-                def url_filter(u: str, _slugs=tuple(all_slugs)) -> bool:
-                    ul = u.lower()
-                    return any(f"/pr/{s}-" in ul or f"/pr/{s}/" in ul
-                               for s in _slugs)
+                listing_limit = args.limit * (3 if args.random else 2)
+                urls = _collect_iherb_brand_listing_urls(
+                    client,
+                    base_url=args.sitemap,
+                    brands=brand_include,
+                    limit=listing_limit,
+                    in_stock_only=require_in_stock,
+                    sample_random=args.random,
+                )
+                if urls:
+                    log.info(
+                        "iHerb brand+stock listing yielded %d URL(s). "
+                        "Will keep first %d qualifying (in-stock=%s, brands=%s).",
+                        len(urls), args.limit, require_in_stock,
+                        ", ".join(brand_include),
+                    )
 
-            log.info("Crawling up to %d sitemap file(s)%s",
-                     max_sm,
-                     " (bumped for brand-narrow query)" if brand_include and args.max_sitemaps is None else "")
-            crawler = SitemapCrawler(client, max_sitemaps=max_sm)
-            urls = crawler.collect_urls(
-                base_url=args.sitemap,
-                limit=target_limit,
-                pattern=args.pattern,
-                sample_random=args.random,
-                url_filter=url_filter,
-            )
             if not urls:
-                log.error("No product URLs found.")
-                log.error("Common causes:")
-                log.error("  1. robots.txt disallowed product pages for this UA")
-                log.error("     → retry with --no-robots")
-                log.error("  2. URL pattern doesn't match this site")
-                log.error("     → retry with --pattern '.*'")
-                return
-            if any_filter:
-                filter_desc = []
-                if min_price > 0:
-                    filter_desc.append(f"price ≥ ${min_price:.2f}")
-                if brand_include:
-                    filter_desc.append(f"brands: {', '.join(brand_include)}")
-                if brand_exclude:
-                    filter_desc.append(f"excluding: {', '.join(brand_exclude)}")
-                log.info("Sitemap yielded %d URL(s). Filters: %s. "
-                         "Will keep first %d qualifying.",
-                         len(urls), " / ".join(filter_desc), args.limit)
+                # Narrow brand queries need to crawl many more sitemap files —
+                # niche brands like "Bob's Red Mill" often live past the first
+                # 20 sub-sitemaps. URL pre-filtering makes deeper crawling cheap.
+                if args.max_sitemaps is not None:
+                    max_sm = args.max_sitemaps
+                elif brand_include:
+                    max_sm = 300
+                else:
+                    max_sm = 20
 
-                # OPTIMIZATION — iHerb encodes brand in URL slug, so we can
-                # pre-filter URLs and skip scraping products from wrong brands.
-                # Cuts wasted fetches by 80-90% for narrow brand targeting.
-                if brand_include:
-                    from urllib.parse import urlparse
-                    host = urlparse(args.sitemap).netloc
-                    urls, dropped = _prefilter_urls_by_brand(urls, brand_include, host)
-                    if dropped > 0:
-                        log.info("URL pre-filter by brand: dropped %d URLs, "
-                                 "%d remain for scraping", dropped, len(urls))
-            else:
-                log.info("Sitemap yielded %d URL(s) to scrape", len(urls))
+                # When brand filter is active on iHerb, apply it INSIDE the
+                # crawler so it keeps walking sitemaps until it has enough
+                # brand-matching URLs — not just enough total URLs. Without this,
+                # niche brands starve because they represent <1% of iHerb's
+                # catalog and the target_pool fills up with unrelated URLs.
+                url_filter = None
+                if brand_include and "iherb.com" in host:
+                    all_slugs: list[str] = []
+                    for b in brand_include:
+                        all_slugs.extend(_brand_to_url_slugs(b))
+                    _seen: set[str] = set()
+                    all_slugs = [s for s in all_slugs if not (s in _seen or _seen.add(s))]
+                    log.info("In-crawl brand filter active; slugs: %s",
+                             ", ".join(all_slugs))
+                    def url_filter(u: str, _slugs=tuple(all_slugs)) -> bool:
+                        ul = u.lower()
+                        return any(f"/pr/{s}-" in ul or f"/pr/{s}/" in ul
+                                   for s in _slugs)
+
+                log.info("Crawling up to %d sitemap file(s)%s",
+                         max_sm,
+                         " (bumped for brand-narrow query)" if brand_include and args.max_sitemaps is None else "")
+                crawler = SitemapCrawler(client, max_sitemaps=max_sm)
+                urls = crawler.collect_urls(
+                    base_url=args.sitemap,
+                    limit=target_limit,
+                    pattern=args.pattern,
+                    sample_random=args.random,
+                    url_filter=url_filter,
+                )
+                if not urls:
+                    log.error("No product URLs found.")
+                    log.error("Common causes:")
+                    log.error("  1. robots.txt disallowed product pages for this UA")
+                    log.error("     → retry with --no-robots")
+                    log.error("  2. URL pattern doesn't match this site")
+                    log.error("     → retry with --pattern '.*'")
+                    return
+                if any_filter:
+                    filter_desc = []
+                    if min_price > 0:
+                        filter_desc.append(f"price ≥ ${min_price:.2f}")
+                    if brand_include:
+                        filter_desc.append(f"brands: {', '.join(brand_include)}")
+                    if brand_exclude:
+                        filter_desc.append(f"excluding: {', '.join(brand_exclude)}")
+                    if require_in_stock:
+                        filter_desc.append("in-stock only")
+                    log.info("Sitemap yielded %d URL(s). Filters: %s. "
+                             "Will keep first %d qualifying.",
+                             len(urls), " / ".join(filter_desc), args.limit)
+
+                    # OPTIMIZATION — iHerb encodes brand in URL slug, so we can
+                    # pre-filter URLs and skip scraping products from wrong brands.
+                    # Cuts wasted fetches by 80-90% for narrow brand targeting.
+                    if brand_include:
+                        from urllib.parse import urlparse
+                        host = urlparse(args.sitemap).netloc
+                        urls, dropped = _prefilter_urls_by_brand(urls, brand_include, host)
+                        if dropped > 0:
+                            log.info("URL pre-filter by brand: dropped %d URLs, "
+                                     "%d remain for scraping", dropped, len(urls))
+                else:
+                    log.info("Sitemap yielded %d URL(s) to scrape", len(urls))
         else:
             urls = read_urls(args.url, args.file)
 
@@ -1021,6 +1239,7 @@ def _run(args, client) -> None:
             products = []
             skipped_price = 0
             skipped_brand = 0
+            skipped_oos = 0
             for i, url in enumerate(urls, 1):
                 p = scraper.scrape_one(url)
                 if p is None:
@@ -1040,24 +1259,38 @@ def _run(args, client) -> None:
                         skipped_brand += 1
                         continue
 
+                # Filter 3: supplier stock — skip OOS so they never reach Keepa
+                if require_in_stock and is_out_of_stock(p.availability):
+                    skipped_oos += 1
+                    log.info("Skipping out-of-stock: %s (%s)",
+                             p.title or url, p.availability)
+                    continue
+
                 products.append(p)
                 if len(products) >= args.limit:
                     log.info(
                         "Reached target of %d qualifying products "
-                        "(scanned %d, skipped: price=%d brand=%d)",
-                        args.limit, i, skipped_price, skipped_brand,
+                        "(scanned %d, skipped: price=%d brand=%d oos=%d)",
+                        args.limit, i, skipped_price, skipped_brand, skipped_oos,
                     )
                     break
             if len(products) < args.limit:
                 log.warning(
                     "Only found %d qualifying products (target: %d). "
-                    "Skipped: price=%d brand=%d. "
+                    "Skipped: price=%d brand=%d oos=%d. "
                     "Consider raising --limit or loosening filters.",
                     len(products), args.limit,
-                    skipped_price, skipped_brand,
+                    skipped_price, skipped_brand, skipped_oos,
                 )
         else:
             products = scraper.scrape_many(urls)
+            if require_in_stock:
+                before = len(products)
+                products = [p for p in products if not is_out_of_stock(p.availability)]
+                dropped = before - len(products)
+                if dropped:
+                    log.info("Excluded %d out-of-stock product(s): %d remain",
+                             dropped, len(products))
         product_dicts = [asdict(p) for p in products]
 
     # --- Sourcing analysis branch (most specific — do first) ------------- #
@@ -1085,6 +1318,7 @@ def _run(args, client) -> None:
         if args.min_reviews is not None:           cfg.min_reviews = args.min_reviews
         if args.require_reviews:                   cfg.require_reviews = True
         if args.max_bsr is not None:               cfg.max_bsr = args.max_bsr
+        if args.include_oos:                       cfg.require_in_stock = False
 
         # Auto-detect currency
         # Since we now default iHerb to US pricing via cookies (see main()),

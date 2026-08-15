@@ -313,6 +313,8 @@ def _summarize_xlsx(job_id: str, xlsx_path: Path) -> None:
                         key = "Selling too slowly (BSR)"
                     elif "no Amazon match" in reason:
                         key = "Not on Amazon"
+                    elif "out of stock" in reason.lower():
+                        key = "Out of stock at supplier"
                     elif "margin" in reason.lower():
                         key = "Margin too thin"
                     elif "ROI" in reason:
@@ -1384,7 +1386,7 @@ INDEX_HTML = r"""
           <div class="field">
             <label>&nbsp;</label>
             <div class="field-hint" style="padding-top: 8px;">
-              For iHerb, the tool pre-filters URLs by brand for speed.
+              For iHerb, the tool uses the brand listing with iHerb's own In-stock filter, then double-checks each product page.
             </div>
           </div>
         </div>
@@ -1462,6 +1464,7 @@ INDEX_HTML = r"""
 
       <div class="run-footer">
         <div class="footnote">
+          Out-of-stock supplier products are skipped automatically.
           Analysis takes roughly 20 seconds per product. Each product costs ~7 Keepa tokens.
         </div>
         <button type="submit" class="btn-run" id="runBtn">Start analysis</button>

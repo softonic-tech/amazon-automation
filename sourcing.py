@@ -13,6 +13,7 @@ them. Wire in Keepa or a paid API to fill these:
   * BSR (Best Sellers Rank — sometimes visible, often not)
 
 Sourcing rules (matches the demo):
+  * Supplier out of stock     → REJECT (skipped at hunt time too)
   * Amazon on listing         → REJECT
   * FBM sellers < min_fbm     → REJECT (requires Keepa)
   * Profit $ <= 0             → REJECT (unprofitable)
@@ -26,6 +27,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,43 @@ from amazon import AmazonProductDetails, AmazonResult, AmazonSearcher, compare_z
 log = logging.getLogger("scraper.sourcing")
 
 NEEDS_KEEPA = "NEEDS_KEEPA"
+
+# schema.org Offer.availability values that mean "cannot buy right now".
+# Matching is case-insensitive and ignores punctuation / URL prefixes
+# (e.g. "https://schema.org/OutOfStock" → "outofstock").
+_OUT_OF_STOCK_TOKENS = frozenset({
+            "outofstock",
+            "outofstocketa",
+            "soldout",
+    "discontinued",
+    "backorder",
+    "backordered",
+    "preorder",
+    "presale",
+    "unavailable",
+    "outofstockonline",
+    "temporarilyoutofstock",
+})
+
+
+def is_out_of_stock(availability: str | None) -> bool:
+    """True only when availability is known to be out of stock.
+
+    Unknown / missing availability is treated as *not* out of stock so we
+    don't drop products just because a page omitted the field.
+    """
+    if not availability:
+        return False
+    raw = str(availability).strip()
+    if not raw:
+        return False
+    low = raw.lower()
+    if "out of stock" in low or "sold out" in low or "not available" in low:
+        return True
+    token = re.sub(r"[^a-z0-9]", "", low.split("/")[-1])
+    if token in _OUT_OF_STOCK_TOKENS:
+        return True
+    return "outofstock" in token or token.endswith("soldout")
 
 
 @dataclass
@@ -60,6 +99,7 @@ class SourcingConfig:
     require_rating: bool = False    # if True, reject "no rating" (unknown rating fails)
     min_reviews: int = 0            # 0 = don't apply
     require_reviews: bool = False   # if True, reject "no reviews"
+    require_in_stock: bool = True   # skip/reject supplier out-of-stock products
 
     # --- Velocity filters ---
     max_bsr: int | None = None              # None = don't apply; e.g. 100000 = mainstream only
@@ -149,6 +189,7 @@ class SourcingRow:
     amazon_url: str | None = None
     search_query: str | None = None
     amazon_title: str | None = None
+    availability: str | None = None  # supplier stock status (InStock / OutOfStock / …)
 
 
 # ---------- Building rows ------------------------------------------------- #
@@ -190,6 +231,7 @@ def build_sourcing_rows_from_supplier(
             supplier_currency=cfg.supplier_currency,
             supplier_to_usd_rate=rate,
             zoro_url=p.get("url"),
+            availability=p.get("availability"),
             fee_pct=cfg.fee_pct,
             extra_cost=cfg.extra_cost,
         )
@@ -309,6 +351,7 @@ def build_sourcing_rows(
             zoro_cost=_to_float(zp.get("price")),
             zoro_url=zp.get("url"),
             search_query=comp.search_query,
+            availability=zp.get("availability"),
             fee_pct=cfg.fee_pct,
             extra_cost=cfg.extra_cost,
         )
@@ -383,6 +426,11 @@ def _compute_profitability(row: SourcingRow) -> None:
 
 def _apply_rules(row: SourcingRow, cfg: SourcingConfig) -> None:
     reasons: list[str] = []
+
+    # === Supplier stock ===
+    if cfg.require_in_stock and is_out_of_stock(row.availability):
+        label = row.availability or "OutOfStock"
+        reasons.append(f"supplier out of stock ({label})")
 
     # === Competition rules ===
 
@@ -465,6 +513,7 @@ DEMO_COLUMNS = [
     ("status",                  "Status"),
     ("zoro_sku",                "Supplier SKU"),
     ("zoro_title",              "Supplier Title"),
+    ("availability",            "Supplier Stock"),
     ("brand",                   "Brand"),
     ("model",                   "Model"),
     ("upc",                     "UPC"),
@@ -573,7 +622,8 @@ def save_sourcing_xlsx(rows: list[SourcingRow], path: Path) -> None:
 
     # Column widths — approximate the demo
     widths = {
-        "Status": 12, "Supplier SKU": 14, "Supplier Title": 55, "Brand": 16,
+        "Status": 12, "Supplier SKU": 14, "Supplier Title": 55,
+        "Supplier Stock": 16, "Brand": 16,
         "Model": 14, "UPC": 14,
         "Supplier Cost (Original)": 14, "Original Currency": 10, "FX Rate (per USD)": 12,
         "Supplier Cost (USD)": 14,
