@@ -79,6 +79,11 @@ class KeepaMatch:
     avg_price_90d: float | None = None
     list_price: float | None = None
 
+    # Buy Box seller (the "Ships from" name on Amazon)
+    buy_box_seller_id: str | None = None     # Keepa/Amazon seller ID (e.g. "A1B2...")
+    buy_box_seller_name: str | None = None   # Human-readable name (e.g. "AmeriStyle")
+    buy_box_is_fba: bool | None = None       # True = FBA, False = FBM, None = unknown
+
     # Amazon-on-listing flag (client-required)
     amazon_on_listing: bool = False
 
@@ -170,6 +175,49 @@ class KeepaClient:
             )
         return results
 
+    def lookup_seller_names(self, seller_ids: list[str]) -> dict[str, str]:
+        """
+        Resolve Amazon seller IDs → seller names via Keepa's /seller endpoint.
+
+        Batches up to 100 IDs per HTTP call and caches results across calls,
+        so re-querying the same seller costs nothing. Cost: ~1 Keepa token
+        per unique seller (very cheap — Amazon's active third-party seller
+        pool is small relative to product count).
+
+        Returns a dict {seller_id: seller_name}. Missing/unresolved IDs
+        are omitted rather than mapped to None, so callers can `.get(id)`
+        with confidence.
+        """
+        # Cache on the client instance so repeat runs in the same process
+        # don't re-pay for the same sellers.
+        if not hasattr(self, "_seller_name_cache"):
+            self._seller_name_cache: dict[str, str] = {}
+
+        # Dedup and filter to only IDs we haven't resolved yet.
+        needed = sorted({
+            sid for sid in seller_ids
+            if isinstance(sid, str) and sid and sid != "-1"
+            and sid not in self._seller_name_cache
+        })
+        if not needed:
+            return {sid: self._seller_name_cache[sid]
+                    for sid in seller_ids if sid in self._seller_name_cache}
+
+        log.info("Keepa: resolving %d seller name(s) via /seller endpoint", len(needed))
+        for chunk in _chunks(needed, self.MAX_BATCH_SIZE):
+            try:
+                sellers = self._get_sellers(chunk)
+            except KeepaError as e:
+                log.warning("Keepa /seller lookup failed for chunk: %s", e)
+                continue
+            for sid, sdata in sellers.items():
+                name = sdata.get("sellerName") if isinstance(sdata, dict) else None
+                if isinstance(name, str) and name.strip():
+                    self._seller_name_cache[sid] = name.strip()
+
+        return {sid: self._seller_name_cache[sid]
+                for sid in seller_ids if sid in self._seller_name_cache}
+
     @property
     def tokens_left(self) -> int | None:
         """Last-known Keepa token balance. None until first request made."""
@@ -231,6 +279,55 @@ class KeepaClient:
 
         raise KeepaError(f"Keepa request failed after {self.max_retries} attempts")
 
+    def _get_sellers(self, seller_ids: list[str]) -> dict[str, dict]:
+        """
+        Call /seller and return the raw {seller_id: seller_data} dict.
+        Same retry/rate-limit semantics as _get_products.
+        """
+        query = {
+            "key": self.api_key,
+            "domain": self.domain,
+            "seller": ",".join(seller_ids),
+        }
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = self.session.get(
+                    f"{API_BASE}/seller",
+                    params=query,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as e:
+                log.warning("Keepa /seller request error (attempt %d): %s", attempt, e)
+                time.sleep(2 ** attempt)
+                continue
+
+            if resp.status_code == 200:
+                data = resp.json()
+                self._tokens_left = data.get("tokensLeft")
+                self._refill_ms = data.get("refillIn")
+                return data.get("sellers") or {}
+
+            if resp.status_code == 429:
+                wait_s = 30
+                try:
+                    body = resp.json()
+                    if "refillIn" in body:
+                        wait_s = max(5, int(body["refillIn"] / 1000) + 1)
+                except json.JSONDecodeError:
+                    pass
+                log.warning("Keepa /seller rate-limited (429), waiting %ss …", wait_s)
+                time.sleep(wait_s)
+                continue
+
+            if resp.status_code in (401, 403):
+                raise KeepaError(f"Auth failed on /seller ({resp.status_code})")
+
+            log.warning("Keepa /seller returned %s (attempt %d): %s",
+                        resp.status_code, attempt, resp.text[:200])
+            time.sleep(2 ** attempt)
+
+        raise KeepaError(f"Keepa /seller failed after {self.max_retries} attempts")
+
     # ---- Response → KeepaMatch ------------------------------------- #
 
     def _to_match(self, p: dict) -> KeepaMatch:
@@ -290,6 +387,21 @@ class KeepaClient:
         m.amazon_on_listing = bool(
             stats.get("buyBoxIsAmazon") or (m.amazon_price is not None)
         )
+
+        # Buy Box seller identity ("Ships from" name on Amazon)
+        # Keepa gives us the sellerId here; the human-readable name needs a
+        # separate /seller lookup which the caller batches (see
+        # KeepaClient.lookup_seller_names).
+        bb_seller_id = stats.get("buyBoxSellerId")
+        if isinstance(bb_seller_id, str) and bb_seller_id and bb_seller_id != "-1":
+            m.buy_box_seller_id = bb_seller_id
+        if stats.get("buyBoxIsAmazon"):
+            # No point calling /seller — this is Amazon itself.
+            m.buy_box_seller_name = "Amazon.com"
+        # FBA-vs-FBM flag for the Buy Box winner, if Keepa exposes it.
+        bb_is_fba = stats.get("buyBoxIsFBA")
+        if isinstance(bb_is_fba, bool):
+            m.buy_box_is_fba = bb_is_fba
 
         # === Seller counts — full breakdown ===
         # Keepa's stats.offerCount* fields are the authoritative "live sellers"

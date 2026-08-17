@@ -181,6 +181,7 @@ class SourcingRow:
     bsr_avg_90d: Any = NEEDS_KEEPA           # 90-day avg BSR (velocity signal)
     category: str | None = None
     buy_box_price: float | None = None
+    ships_from: str | None = None            # Amazon seller name winning the Buy Box
     avg_price_90d: float | None = None
     # --- Decision ---
     reject_reasons: str = ""
@@ -251,6 +252,10 @@ def enrich_rows_with_keepa(
     Rows without a UPC are marked "no UPC" and skipped.
     Rows where Keepa finds no match are marked "no Amazon match".
     """
+    # Track (row, seller_id) pairs so we can batch-resolve names after the
+    # product loop instead of paying one HTTP round-trip per product.
+    pending_seller_lookup: list[tuple[SourcingRow, str]] = []
+
     for i, row in enumerate(rows, 1):
         if not row.upc:
             row.reject_reasons = _append_reason(row.reject_reasons, "no UPC available")
@@ -289,12 +294,35 @@ def enrich_rows_with_keepa(
         row.bsr_avg_90d = match.bsr_avg_90d
         row.category = match.category
 
+        # "Ships From" — the seller name winning the Buy Box.
+        # Only meaningful when a Buy Box actually exists; if not, leave blank
+        # so the column reads honestly (rather than "Amazon.com" by default).
+        if match.buy_box_price is not None:
+            if match.buy_box_seller_name:
+                row.ships_from = match.buy_box_seller_name
+            elif match.buy_box_seller_id:
+                pending_seller_lookup.append((row, match.buy_box_seller_id))
+
         # Now recompute profitability with real Amazon price
         _compute_profitability(row)
 
         # Re-apply rules with the fresh data
         if cfg is not None:
             _apply_rules(row, cfg)
+
+    # Batch-resolve all Buy Box seller names in one /seller call (up to 100
+    # unique IDs per call — very few unique sellers usually, so this is cheap).
+    if pending_seller_lookup and hasattr(keepa_client, "lookup_seller_names"):
+        unique_ids = list({sid for _, sid in pending_seller_lookup})
+        try:
+            names = keepa_client.lookup_seller_names(unique_ids)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Keepa seller-name batch lookup failed: %s", e)
+            names = {}
+        for row, sid in pending_seller_lookup:
+            # Prefer real name; fall back to raw sellerId so the column is
+            # never mysteriously blank when we know a Buy Box seller exists.
+            row.ships_from = names.get(sid) or sid
 
     # Report Keepa balance
     tokens = getattr(keepa_client, "tokens_left", None)
@@ -525,6 +553,7 @@ DEMO_COLUMNS = [
     ("amazon_title",            "Amazon Title"),
     ("amazon_sell_price",       "Amazon Sell Price"),
     ("buy_box_price",           "Buy Box Price"),
+    ("ships_from",              "Ships From"),
     ("avg_price_90d",           "Avg Price 90d"),
     ("fee_pct",                 "Fee %"),
     ("fee_dollars",             "Fee $"),
@@ -629,6 +658,7 @@ def save_sourcing_xlsx(rows: list[SourcingRow], path: Path) -> None:
         "Supplier Cost (USD)": 14,
         "Amazon ASIN": 13,
         "Amazon Title": 40, "Amazon Sell Price": 13, "Buy Box Price": 12,
+        "Ships From": 22,
         "Avg Price 90d": 12, "Fee %": 8, "Fee $": 10,
         "Extra Cost": 10, "Profit $": 10, "Margin %": 10, "ROI %": 10,
         "FBM Sellers (live)": 14, "FBA Sellers (live)": 14,
