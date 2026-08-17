@@ -33,7 +33,8 @@ log = logging.getLogger("diagnose")
 def _extract_iherb_ids(url: str) -> dict:
     """Fetch the iHerb product page and pull every identifier from JSON-LD."""
     from curl_client import CurlClient
-    client = CurlClient()
+    # Skip robots.txt — matches how the main pipeline runs (--no-robots).
+    client = CurlClient(respect_robots=False)
     html = client.get(url)
     if not html:
         log.error("Failed to fetch iHerb page")
