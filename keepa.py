@@ -148,19 +148,34 @@ class KeepaClient:
         """
         UPC → single best-match KeepaMatch (or None if no products found).
 
-        Keepa's /product?code=UPC returns *all* ASINs sharing that UPC.
-        We pick the best listability candidate (see _rank_candidates).
+        Kept for backwards compatibility. Callers that want ALL variations
+        sharing a UPC (e.g. different sizes/colours of the same product)
+        should use lookup_all_by_upc instead.
+        """
+        matches = self.lookup_all_by_upc(upc)
+        return matches[0] if matches else None
+
+    def lookup_all_by_upc(self, upc: str) -> list[KeepaMatch]:
+        """
+        UPC → every ASIN variation sharing that UPC on Amazon, ranked so
+        the best sourcing candidate is first (see _rank_candidates).
+
+        Keepa's /product?code=UPC returns all matching ASINs in a single
+        response — costing the same as one lookup — so returning them all
+        is free of extra token cost.
+
+        Returns [] if the UPC is blank or Amazon has no match.
         """
         if not upc or not upc.strip():
-            return None
+            return []
         products = self._get_products(code=upc.strip())
         if not products:
             log.info("No Amazon products for UPC %s", upc)
-            return None
+            return []
         matches = [self._to_match(p) for p in products if p.get("asin")]
         if not matches:
-            return None
-        return self._rank_candidates(matches)[0]
+            return []
+        return self._rank_candidates(matches)
 
     def lookup_asins(self, asins: list[str]) -> list[KeepaMatch]:
         """

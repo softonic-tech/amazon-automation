@@ -28,7 +28,7 @@ import csv
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -240,6 +240,50 @@ def build_sourcing_rows_from_supplier(
     return rows
 
 
+def _apply_keepa_match(row: SourcingRow, match) -> None:
+    """Populate Amazon-side fields on `row` from a KeepaMatch."""
+    row.amazon_asin = match.asin
+    row.amazon_title = match.title
+    row.amazon_url = f"https://www.amazon.com/dp/{match.asin}"
+    row.amazon_sell_price = match.buy_box_price or match.new_price
+    row.buy_box_price = match.buy_box_price
+    row.avg_price_90d = match.avg_price_90d
+    row.fbm_sellers = match.fbm_seller_count_live
+    row.fba_sellers = match.fba_seller_count_live
+    row.total_sellers_live = match.total_offer_count_live
+    row.historical_sellers = match.total_historical_sellers
+    row.amazon_on_listing = "Yes" if match.amazon_on_listing else "No"
+    row.rating = str(match.rating) if match.rating else None
+    row.reviews = str(match.review_count) if match.review_count else None
+    row.bsr = match.bsr
+    row.bsr_avg_90d = match.bsr_avg_90d
+    row.category = match.category
+    # Buy Box seller name is populated inline when Amazon has the box; other
+    # cases are deferred to a batched /seller lookup by the caller.
+    if match.buy_box_price is not None and match.buy_box_seller_name:
+        row.ships_from = match.buy_box_seller_name
+
+
+def _clone_for_variation(source: SourcingRow) -> SourcingRow:
+    """
+    Create a fresh SourcingRow carrying the supplier-side data from `source`
+    but with Amazon-side fields reset to defaults, so a second/third ASIN
+    variation gets its own row rather than overwriting the first.
+    """
+    fresh = SourcingRow()
+    # Copy every supplier / config field; leave Amazon fields at defaults.
+    supplier_attrs = (
+        "zoro_sku", "zoro_title", "brand", "model", "upc",
+        "zoro_cost", "supplier_original_price",
+        "supplier_currency", "supplier_to_usd_rate",
+        "fee_pct", "extra_cost",
+        "zoro_url", "availability", "search_query",
+    )
+    for attr in supplier_attrs:
+        setattr(fresh, attr, getattr(source, attr))
+    return fresh
+
+
 def enrich_rows_with_keepa(
     rows: list[SourcingRow],
     keepa_client,
@@ -249,66 +293,77 @@ def enrich_rows_with_keepa(
     Take sourcing rows produced from supplier scraping, look up each UPC on
     Keepa, and fill in the Amazon-side fields (ASIN, BSR, seller counts, etc.).
 
+    IMPORTANT: A single supplier product may map to multiple Amazon ASINs
+    (variations: sizes, colours, pack counts — all sharing one UPC family).
+    This function fans out — each qualifying ASIN gets its own row in the
+    returned list, sharing the same supplier data but with independent
+    Amazon-side data and independent rule evaluation. That means the
+    output list can be LONGER than the input list.
+
     Rows without a UPC are marked "no UPC" and skipped.
     Rows where Keepa finds no match are marked "no Amazon match".
     """
     # Track (row, seller_id) pairs so we can batch-resolve names after the
     # product loop instead of paying one HTTP round-trip per product.
     pending_seller_lookup: list[tuple[SourcingRow, str]] = []
+    enriched: list[SourcingRow] = []
+    total_variations = 0
 
     for i, row in enumerate(rows, 1):
         if not row.upc:
             row.reject_reasons = _append_reason(row.reject_reasons, "no UPC available")
             row.status = "Rejected"
+            enriched.append(row)
             continue
 
         log.info("[%d/%d] Keepa lookup UPC %s", i, len(rows), row.upc)
         try:
-            match = keepa_client.lookup_by_upc(row.upc)
+            # NEW: get every ASIN variation sharing this UPC, not just the
+            # best-ranked one. Same Keepa cost (one /product?code=UPC call
+            # returns all of them).
+            matches = keepa_client.lookup_all_by_upc(row.upc)
         except Exception as e:  # noqa: BLE001
             log.warning("Keepa error for UPC %s: %s", row.upc, e)
             row.reject_reasons = _append_reason(row.reject_reasons, f"Keepa error: {e}")
             row.status = "INCOMPLETE"
+            enriched.append(row)
             continue
 
-        if match is None:
+        if not matches:
             row.reject_reasons = _append_reason(row.reject_reasons, "no Amazon match for UPC")
             row.status = "Rejected"
+            enriched.append(row)
             continue
 
-        # Populate Amazon-side fields from the Keepa match
-        row.amazon_asin = match.asin
-        row.amazon_title = match.title
-        row.amazon_url = f"https://www.amazon.com/dp/{match.asin}"
-        row.amazon_sell_price = match.buy_box_price or match.new_price
-        row.buy_box_price = match.buy_box_price
-        row.avg_price_90d = match.avg_price_90d
-        row.fbm_sellers = match.fbm_seller_count_live
-        row.fba_sellers = match.fba_seller_count_live
-        row.total_sellers_live = match.total_offer_count_live
-        row.historical_sellers = match.total_historical_sellers
-        row.amazon_on_listing = "Yes" if match.amazon_on_listing else "No"
-        row.rating = str(match.rating) if match.rating else None
-        row.reviews = str(match.review_count) if match.review_count else None
-        row.bsr = match.bsr
-        row.bsr_avg_90d = match.bsr_avg_90d
-        row.category = match.category
+        if len(matches) > 1:
+            total_variations += len(matches) - 1
+            log.info("  → UPC %s has %d Amazon variations; fanning out to "
+                     "one row per ASIN", row.upc, len(matches))
 
-        # "Ships From" — the seller name winning the Buy Box.
-        # Only meaningful when a Buy Box actually exists; if not, leave blank
-        # so the column reads honestly (rather than "Amazon.com" by default).
-        if match.buy_box_price is not None:
-            if match.buy_box_seller_name:
-                row.ships_from = match.buy_box_seller_name
-            elif match.buy_box_seller_id:
-                pending_seller_lookup.append((row, match.buy_box_seller_id))
+        for idx, match in enumerate(matches):
+            # First match reuses the incoming row (preserves any pre-set
+            # supplier fields untouched); additional variations get a clone
+            # so each ASIN has independent Amazon data and its own status.
+            target = row if idx == 0 else _clone_for_variation(row)
 
-        # Now recompute profitability with real Amazon price
-        _compute_profitability(row)
+            _apply_keepa_match(target, match)
 
-        # Re-apply rules with the fresh data
-        if cfg is not None:
-            _apply_rules(row, cfg)
+            if (match.buy_box_price is not None
+                    and not target.ships_from
+                    and match.buy_box_seller_id):
+                pending_seller_lookup.append((target, match.buy_box_seller_id))
+
+            _compute_profitability(target)
+            if cfg is not None:
+                _apply_rules(target, cfg)
+
+            # Preserves rank order: best-scored match (idx=0) appears first,
+            # subsequent variations in ranked order below it.
+            enriched.append(target)
+
+    if total_variations:
+        log.info("Fanned out %d extra Amazon variation row(s) across %d supplier product(s)",
+                 total_variations, len(rows))
 
     # Batch-resolve all Buy Box seller names in one /seller call (up to 100
     # unique IDs per call — very few unique sellers usually, so this is cheap).
@@ -319,17 +374,17 @@ def enrich_rows_with_keepa(
         except Exception as e:  # noqa: BLE001
             log.warning("Keepa seller-name batch lookup failed: %s", e)
             names = {}
-        for row, sid in pending_seller_lookup:
+        for r, sid in pending_seller_lookup:
             # Prefer real name; fall back to raw sellerId so the column is
             # never mysteriously blank when we know a Buy Box seller exists.
-            row.ships_from = names.get(sid) or sid
+            r.ships_from = names.get(sid) or sid
 
     # Report Keepa balance
     tokens = getattr(keepa_client, "tokens_left", None)
     if tokens is not None:
         log.info("Keepa tokens remaining: %d", tokens)
 
-    return rows
+    return enriched
 
 
 def _append_reason(existing: str, new: str) -> str:
