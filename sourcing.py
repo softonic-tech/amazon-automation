@@ -308,37 +308,92 @@ def enrich_rows_with_keepa(
     pending_seller_lookup: list[tuple[SourcingRow, str]] = []
     enriched: list[SourcingRow] = []
     total_variations = 0
+    total_via_search_only = 0
+
+    # Title search fallback catches Amazon listings with no UPC (very common
+    # for pack-size variants). Adds ~10 tokens per row but roughly doubles
+    # ASIN coverage. Can be disabled by setting KEEPA_TITLE_SEARCH=0 in env.
+    import os as _os
+    title_search_enabled = (
+        _os.environ.get("KEEPA_TITLE_SEARCH", "1").strip().lower()
+        not in ("0", "false", "no", "off")
+        and hasattr(keepa_client, "search_by_brand_title")
+    )
 
     for i, row in enumerate(rows, 1):
-        if not row.upc:
-            row.reject_reasons = _append_reason(row.reject_reasons, "no UPC available")
-            row.status = "Rejected"
-            enriched.append(row)
-            continue
+        # STEP 1 — UPC lookup (fast, exact when it works).
+        upc_matches = []
+        if row.upc:
+            log.info("[%d/%d] Keepa UPC %s", i, len(rows), row.upc)
+            try:
+                upc_matches = keepa_client.lookup_all_by_upc(row.upc)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Keepa UPC error for %s: %s", row.upc, e)
+                row.reject_reasons = _append_reason(
+                    row.reject_reasons, f"Keepa UPC error: {e}"
+                )
+                row.status = "INCOMPLETE"
+                enriched.append(row)
+                continue
 
-        log.info("[%d/%d] Keepa lookup UPC %s", i, len(rows), row.upc)
-        try:
-            # NEW: get every ASIN variation sharing this UPC, not just the
-            # best-ranked one. Same Keepa cost (one /product?code=UPC call
-            # returns all of them).
-            matches = keepa_client.lookup_all_by_upc(row.upc)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Keepa error for UPC %s: %s", row.upc, e)
-            row.reject_reasons = _append_reason(row.reject_reasons, f"Keepa error: {e}")
-            row.status = "INCOMPLETE"
-            enriched.append(row)
-            continue
+        # STEP 2 — title/brand search fallback. Catches:
+        #   * Products where iHerb has no UPC in JSON-LD
+        #   * Amazon ASINs with UPC list = [] (seller never registered a
+        #     barcode) — e.g. B0BLHRM711 Alter Eco Granola 6-pack
+        #   * Additional variations Amazon linked under different UPCs
+        search_matches = []
+        if title_search_enabled and row.brand and row.zoro_title:
+            if not row.upc:
+                log.info("[%d/%d] Keepa title search '%s' (no UPC)",
+                         i, len(rows), row.brand)
+            try:
+                search_matches = keepa_client.search_by_brand_title(
+                    brand=row.brand, title=row.zoro_title, limit=8,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Keepa title search error for '%s' / '%s': %s",
+                            row.brand, (row.zoro_title or "")[:40], e)
+
+        # Merge UPC + search results, dedupe by ASIN (UPC hits first so
+        # they win rank order — they're the strongest identity signal).
+        seen_asins: set[str] = set()
+        matches = []
+        for m in upc_matches + search_matches:
+            if m.asin and m.asin not in seen_asins:
+                seen_asins.add(m.asin)
+                matches.append(m)
+
+        # Defensive cap so a bad brand+title combo can't fan out infinitely.
+        matches = matches[:15]
 
         if not matches:
-            row.reject_reasons = _append_reason(row.reject_reasons, "no Amazon match for UPC")
+            if not row.upc and not row.brand:
+                reason = "no UPC and no brand/title on supplier product"
+            elif row.upc:
+                reason = "no Amazon match (tried UPC + title search)"
+            else:
+                reason = "no Amazon match for brand/title"
+            row.reject_reasons = _append_reason(row.reject_reasons, reason)
             row.status = "Rejected"
             enriched.append(row)
             continue
+
+        # Diagnostic: how many ASINs came from search that UPC alone missed?
+        upc_asins = {m.asin for m in upc_matches}
+        search_only = [m for m in search_matches if m.asin not in upc_asins]
+        if search_only and not upc_matches:
+            total_via_search_only += len(search_only)
+            log.info("  → title search rescued %d ASIN(s) (no UPC match): %s",
+                     len(search_only), ", ".join(m.asin for m in search_only[:3]))
+        elif search_only:
+            total_via_search_only += len(search_only)
+            log.info("  → title search added %d extra ASIN(s) on top of UPC: %s",
+                     len(search_only), ", ".join(m.asin for m in search_only[:3]))
 
         if len(matches) > 1:
             total_variations += len(matches) - 1
-            log.info("  → UPC %s has %d Amazon variations; fanning out to "
-                     "one row per ASIN", row.upc, len(matches))
+            log.info("  → %d Amazon variations found; fanning out to "
+                     "one row per ASIN", len(matches))
 
         for idx, match in enumerate(matches):
             # First match reuses the incoming row (preserves any pre-set
@@ -364,6 +419,9 @@ def enrich_rows_with_keepa(
     if total_variations:
         log.info("Fanned out %d extra Amazon variation row(s) across %d supplier product(s)",
                  total_variations, len(rows))
+    if total_via_search_only:
+        log.info("Title-search fallback surfaced %d ASIN(s) that UPC lookup would have missed",
+                 total_via_search_only)
 
     # Batch-resolve all Buy Box seller names in one /seller call (up to 100
     # unique IDs per call — very few unique sellers usually, so this is cheap).

@@ -190,6 +190,66 @@ class KeepaClient:
             )
         return results
 
+    def search_by_brand_title(
+        self,
+        brand: str,
+        title: str,
+        limit: int = 8,
+        max_title_words: int = 6,
+    ) -> list[KeepaMatch]:
+        """
+        Text-search Amazon via Keepa /search using a clean brand+title
+        query, then filter results strictly to the supplier's brand.
+
+        This is the fallback path for Amazon listings that can't be
+        reached via UPC — either the supplier has no UPC, or Amazon's
+        seller never registered a barcode on the listing (very common
+        for pack-size variants). Verified working on B0BLHRM711 case
+        (Alter Eco Dark Chocolate Granola 6-pack, UPC-less on Amazon).
+
+        Cost: ~10 Keepa tokens per unique query, cached across the
+        process so repeated brands/titles within a run are free.
+        Results are ranked by _rank_candidates so best-listability
+        candidates come first.
+        """
+        if not brand or not title:
+            return []
+        query = _build_search_query(brand, title, max_title_words)
+        if not query:
+            return []
+
+        if not hasattr(self, "_search_cache"):
+            self._search_cache: dict[str, list[KeepaMatch]] = {}
+        if query in self._search_cache:
+            return self._search_cache[query]
+
+        try:
+            products = self._search_products(query)
+        except KeepaError as e:
+            log.warning("Keepa /search failed for %r: %s", query, e)
+            return []
+
+        supplier_brand_norm = _normalize_brand(brand)
+        matches: list[KeepaMatch] = []
+        skipped_brands: set[str] = set()
+        for p in products:
+            if not p.get("asin"):
+                continue
+            keepa_brand = p.get("brand") or ""
+            if _normalize_brand(keepa_brand) != supplier_brand_norm:
+                skipped_brands.add(keepa_brand)
+                continue
+            matches.append(self._to_match(p))
+
+        log.debug("Keepa /search %r → %d hits, %d after brand filter %r "
+                  "(dropped brands: %s)",
+                  query, len(products), len(matches), brand,
+                  ", ".join(sorted(skipped_brands)) or "none")
+
+        matches = self._rank_candidates(matches)[:limit]
+        self._search_cache[query] = matches
+        return matches
+
     def lookup_seller_names(self, seller_ids: list[str]) -> dict[str, str]:
         """
         Resolve Amazon seller IDs → seller names via Keepa's /seller endpoint.
@@ -293,6 +353,64 @@ class KeepaClient:
             time.sleep(2 ** attempt)
 
         raise KeepaError(f"Keepa request failed after {self.max_retries} attempts")
+
+    def _search_products(self, term: str) -> list[dict]:
+        """
+        Call /search?type=product with stats+offers so the returned products
+        have the same structure as /product responses (usable by _to_match
+        directly, so no follow-up ASIN lookup is needed). Same retry /
+        rate-limit semantics as _get_products.
+        """
+        query = {
+            "key": self.api_key,
+            "domain": self.domain,
+            "type": "product",
+            "term": term,
+            "stats": self.stats_days,
+            "offers": self.offers_count,
+            "page": 0,
+        }
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = self.session.get(
+                    f"{API_BASE}/search",
+                    params=query,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as e:
+                log.warning("Keepa /search request error (attempt %d): %s", attempt, e)
+                time.sleep(2 ** attempt)
+                continue
+
+            if resp.status_code == 200:
+                data = resp.json()
+                self._tokens_left = data.get("tokensLeft")
+                self._refill_ms = data.get("refillIn")
+                # /search returns full product records in `products` when
+                # stats=N is set, otherwise just ASINs in `asinList`. We
+                # request stats so we always get the rich form.
+                return data.get("products") or []
+
+            if resp.status_code == 429:
+                wait_s = 30
+                try:
+                    body = resp.json()
+                    if "refillIn" in body:
+                        wait_s = max(5, int(body["refillIn"] / 1000) + 1)
+                except json.JSONDecodeError:
+                    pass
+                log.warning("Keepa /search rate-limited (429), waiting %ss …", wait_s)
+                time.sleep(wait_s)
+                continue
+
+            if resp.status_code in (401, 403):
+                raise KeepaError(f"Auth failed on /search ({resp.status_code})")
+
+            log.warning("Keepa /search returned %s (attempt %d): %s",
+                        resp.status_code, attempt, resp.text[:200])
+            time.sleep(2 ** attempt)
+
+        raise KeepaError(f"Keepa /search failed after {self.max_retries} attempts")
 
     def _get_sellers(self, seller_ids: list[str]) -> dict[str, dict]:
         """
@@ -517,3 +635,54 @@ def _cents_to_dollars(cents: int | None) -> float | None:
 def _chunks(seq: list, size: int):
     for i in range(0, len(seq), size):
         yield seq[i : i + size]
+
+
+def _normalize_brand(s: str) -> str:
+    """
+    Case- and punctuation-insensitive brand key.
+    "Bob's Red Mill" → "bobsredmill",  "Alter Eco" → "altereco"
+    Used for strict brand-match filtering on Keepa /search results
+    (protects against false positives from Keepa's fuzzy title index).
+    """
+    if not s:
+        return ""
+    import re as _re
+    return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def _build_search_query(brand: str, title: str, max_words: int = 6) -> str:
+    """
+    Compose a clean Keepa /search term from supplier brand + title.
+
+    - Strips punctuation that confuses text search (commas, parens, pipes)
+    - Skips duplicate brand words at the start of the title
+      (iHerb titles often start with the brand)
+    - Caps title portion to `max_words` for a focused query
+
+    Example:
+      brand = "Alter Eco"
+      title = "Alter Eco, Organic Granola, Dark Chocolate, 8 oz (227 g)"
+      → "Alter Eco Organic Granola Dark Chocolate 8 oz"
+    """
+    if not brand or not title:
+        return ""
+    import re as _re
+    clean_title = _re.sub(r"[,()\[\]|/]", " ", title)
+    clean_title = _re.sub(r"\s+", " ", clean_title).strip()
+    clean_brand = _re.sub(r"[,()\[\]|/]", " ", brand).strip()
+
+    title_words = clean_title.split()
+    brand_words_lower = [w.lower() for w in clean_brand.split()]
+
+    # Skip a leading brand prefix in the title so we don't repeat it.
+    i = 0
+    while i < len(title_words) and i < len(brand_words_lower):
+        if title_words[i].lower() == brand_words_lower[i]:
+            i += 1
+        else:
+            break
+
+    keep = title_words[i : i + max_words]
+    if not keep:
+        return clean_brand
+    return f"{clean_brand} {' '.join(keep)}".strip()
