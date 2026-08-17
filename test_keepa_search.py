@@ -44,21 +44,32 @@ for q in QUERIES:
     products = data.get("products") or []
     print(f"  Tokens left: {tokens_left}")
     print(f"  asinList count: {len(asins)}   products count: {len(products)}")
-    if TARGET in asins:
-        rank = asins.index(TARGET) + 1
-        print(f"  ✓ FOUND {TARGET} at rank {rank}")
+
+    # Union of ASINs from both fields (Keepa returns them in `products`
+    # when stats=1 is set, and in `asinList` when it's not).
+    all_asins = [p.get("asin") for p in products if p.get("asin")]
+    for a in asins:
+        if a not in all_asins:
+            all_asins.append(a)
+
+    if TARGET in all_asins:
+        rank = all_asins.index(TARGET) + 1
+        print(f"  ✓✓✓ FOUND {TARGET} at rank {rank}")
     else:
         print(f"  ✗ {TARGET} NOT in results")
-    # Show top 5 asins for eyeballing
-    for i, a in enumerate(asins[:5], 1):
-        marker = "  <-- target!" if a == TARGET else ""
-        # Try to find title from products list
+
+    # Top 10 for eyeballing
+    print("  Top 10 results:")
+    for i, a in enumerate(all_asins[:10], 1):
         title = ""
+        brand = ""
         for p in products:
             if p.get("asin") == a:
-                title = (p.get("title") or "")[:70]
+                title = (p.get("title") or "")[:60]
+                brand = p.get("brand") or ""
                 break
-        print(f"    {i}. {a}  {title}{marker}")
+        marker = "  <-- TARGET!" if a == TARGET else ""
+        print(f"    {i:2d}. {a}  [{brand}]  {title}{marker}")
 
 print()
 print("=== Also: does Keepa know B0BLHRM711 at all in text index? ===")
