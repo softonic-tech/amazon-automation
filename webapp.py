@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -176,8 +177,73 @@ def _make_job(mode: str) -> str:
             "created_at": time.time(),
             "keepa_exhausted": False,   # sticky flag; set from log scan
             "keepa_tokens_left": None,  # last known token balance
+            # Live progress fields (populated by _append_log regex scan)
+            "current": None,             # e.g. 15
+            "total": None,               # e.g. 25
+            "current_activity": None,    # human-readable line, e.g. "Keepa UPC 12345"
+            "urls_discovered": None,     # from "Sitemap yielded N URL(s)"
+            "urls_after_filter": None,   # from "N remain for scraping"
+            "eta_seconds": None,         # simple linear extrapolation
+            # ETA baseline — snapshotted on first N/M seen in current stage
+            "_eta_stage": None,
+            "_eta_start_time": None,
+            "_eta_start_count": None,
         }
     return job_id
+
+
+# --- Regex anchors for log-line progress extraction ---
+# These patterns match lines emitted by scraper.py and sourcing.py. Keep in
+# sync with those modules — if you rename a log message there, update here.
+# NOTE: scraper.py's logger prepends "HH:MM:SS [INFO] " to every line, so
+# _RE_STEP uses `search` (not `match`) with a whitespace anchor before `[N/M]`
+# to avoid false positives on nested "[INFO]"-style prefixes.
+_RE_STEP = re.compile(r"(?:^|\s)\[(\d+)/(\d+)\]\s+(.+?)(?:\s*$)")
+_RE_URLS_YIELDED = re.compile(r"Sitemap yielded (\d+) URL", re.IGNORECASE)
+_RE_URLS_KEPT = re.compile(r"(\d+) remain(?:ing)?(?:\s+for scraping)?",
+                           re.IGNORECASE)
+_RE_TOKENS = re.compile(r"Keepa tokens remaining:\s*(\d+)", re.IGNORECASE)
+_RE_FETCHING = re.compile(r"Fetching\s+(https?://\S+)")
+
+
+def _summarize_step(rest: str) -> str:
+    """
+    Turn a raw '[N/M] ...' line body into a compact human-readable
+    'current activity' string for the progress card. Kept short — the UI
+    shows this inline next to the progress bar.
+    """
+    if "Keepa UPC" in rest:
+        upc = rest.split("Keepa UPC", 1)[1].strip()[:20]
+        return f"Amazon lookup for UPC {upc}"
+    if "Keepa title search" in rest:
+        after = rest.split("Keepa title search", 1)[1].strip()
+        return f"Amazon title search: {after[:50]}"
+    if "Scraping product" in rest:
+        return "Scraping supplier product page"
+    return rest[:80]
+
+
+def _update_eta(job: dict, current: int, total: int) -> None:
+    """
+    Simple linear-rate ETA. Snapshots progress on entry to each stage so
+    a slow first item doesn't skew the estimate for the whole run.
+    """
+    if total <= 0 or current <= 0:
+        return
+    stage = job.get("stage")
+    now = time.time()
+    # Reset baseline whenever stage changes so ETA is per-stage.
+    if job.get("_eta_stage") != stage:
+        job["_eta_stage"] = stage
+        job["_eta_start_time"] = now
+        job["_eta_start_count"] = current - 1  # count as if we just started
+    elapsed = now - (job["_eta_start_time"] or now)
+    done_since_baseline = current - (job["_eta_start_count"] or 0)
+    if elapsed >= 3 and done_since_baseline > 0:
+        rate = done_since_baseline / elapsed  # items/sec
+        remaining = max(0, total - current)
+        if rate > 0:
+            job["eta_seconds"] = int(remaining / rate)
 
 
 def _append_log(job_id: str, line: str) -> None:
@@ -192,11 +258,11 @@ def _append_log(job_id: str, line: str) -> None:
         low = line.lower()
         if "sitemap" in low or "discovered" in low or "collected" in low:
             job["stage"] = "discovering"
-        elif "fetching" in low:
+        elif "scraping product" in low or "fetching " in low:
             job["stage"] = "scraping"
         elif "keepa" in low and ("lookup" in low or "upc" in low or "title search" in low):
             job["stage"] = "matching"
-        elif "sourcing done" in low:
+        elif "sourcing done" in low or "wrote " in low and "sourcing rows" in low:
             job["stage"] = "finalizing"
 
         # Surface Keepa quota-exhaustion state to the UI so users see a
@@ -204,13 +270,54 @@ def _append_log(job_id: str, line: str) -> None:
         # rejected" message.
         if "keepa quota exhausted" in low or "keepa tokens exhausted" in low:
             job["keepa_exhausted"] = True
-        # Track live token balance from lines like
-        # "[15/25] Keepa tokens remaining: 187"
-        if "keepa tokens remaining:" in low:
+
+        # --- Structured progress extraction (per-item counters, ETA) ---
+
+        # [N/M] step progress — anchor for scraping AND matching stages.
+        # `search` is intentional: log lines are prefixed with a timestamp +
+        # "[INFO]" by the scraper subprocess before hitting stdout.
+        m = _RE_STEP.search(line)
+        if m:
             try:
-                job["keepa_tokens_left"] = int(line.rsplit(":", 1)[1].strip())
+                current, total = int(m.group(1)), int(m.group(2))
+                job["current"] = current
+                job["total"] = total
+                job["current_activity"] = _summarize_step(m.group(3))
+                _update_eta(job, current, total)
             except (ValueError, IndexError):
                 pass
+
+        # Discovery counters — tell the user how many URLs were found
+        m = _RE_URLS_YIELDED.search(line)
+        if m:
+            try:
+                job["urls_discovered"] = int(m.group(1))
+                job["current_activity"] = f"Discovered {m.group(1)} product URLs"
+            except (ValueError, IndexError):
+                pass
+        m = _RE_URLS_KEPT.search(line)
+        if m and "URL pre-filter" in line:
+            try:
+                job["urls_after_filter"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+
+        # Live token balance (heartbeat lines from sourcing.py + final line)
+        m = _RE_TOKENS.search(line)
+        if m:
+            try:
+                job["keepa_tokens_left"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+
+        # Also useful: individual Fetching lines when [N/M] wasn't present
+        # (legacy scraper.scrape_one direct callers)
+        if job.get("current_activity") is None:
+            fm = _RE_FETCHING.search(line)
+            if fm:
+                url = fm.group(1)
+                slug = url.rstrip("/").split("/")[-2 if url.endswith("/") else -1]
+                job["current_activity"] = f"Fetching {slug[:60]}"
 
 
 def _mark_status(job_id: str, status: str, **extra) -> None:
@@ -471,6 +578,12 @@ def api_status(job_id: str):
             "summary": job["summary"],
             "keepa_exhausted": job.get("keepa_exhausted", False),
             "keepa_tokens_left": job.get("keepa_tokens_left"),
+            "current": job.get("current"),
+            "total": job.get("total"),
+            "current_activity": job.get("current_activity"),
+            "urls_discovered": job.get("urls_discovered"),
+            "urls_after_filter": job.get("urls_after_filter"),
+            "eta_seconds": job.get("eta_seconds"),
         })
 
 
@@ -1125,6 +1238,107 @@ INDEX_HTML = r"""
       line-height: 1.3;
     }
 
+    /* Live progress bar */
+    .progress-bar-wrap {
+      margin: 8px 0 16px;
+      display: none;
+    }
+    .progress-bar-wrap.visible { display: block; }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .progress-header .label {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .progress-header .counter {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--brand);
+      transition: width 0.5s ease;
+      width: 0%;
+    }
+    .progress-detail {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .progress-detail .activity {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .progress-detail .eta {
+      color: var(--brand);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .progress-pills {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .pill strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .pill.warn {
+      background: #FEF3C7;
+      border-color: #FDE68A;
+      color: #92400E;
+    }
+    .pill.warn strong { color: #78350F; }
+
+    /* Keepa-exhausted banner (shown only when tokens ran out mid-run) */
+    .banner-warn {
+      display: none;
+      background: #FEF3C7;
+      border: 1px solid #FDE68A;
+      border-left: 4px solid #F59E0B;
+      color: #78350F;
+      padding: 12px 16px;
+      border-radius: 2px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .banner-warn.visible { display: block; }
+    .banner-warn strong { color: #78350F; }
+
     .log-view {
       background: #14201C;
       color: #D8CFB8;
@@ -1513,6 +1727,29 @@ INDEX_HTML = r"""
       </div>
     </div>
 
+    <div class="banner-warn" id="keepaExhaustedBanner">
+      <strong>Keepa quota hit.</strong>
+      Partial results were saved. Products still to check are marked
+      <em>INCOMPLETE</em> in the Excel file — re-run in a few minutes once
+      Keepa refills your token bucket.
+    </div>
+
+    <div class="progress-bar-wrap" id="progressBarWrap">
+      <div class="progress-header">
+        <span class="label" id="progressStageLabel">Working</span>
+        <span class="counter" id="progressCounter"></span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-bar-fill" id="progressBarFill"></div>
+      </div>
+      <div class="progress-detail">
+        <span class="activity" id="progressActivity">&nbsp;</span>
+        <span class="eta" id="progressEta"></span>
+      </div>
+    </div>
+
+    <div class="progress-pills" id="progressPills"></div>
+
     <div class="log-view" id="logView"></div>
   </div>
 
@@ -1612,6 +1849,13 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
   document.getElementById("progressCard").classList.add("visible");
   document.getElementById("logView").textContent = "";
   document.querySelectorAll(".stage").forEach(s => s.classList.remove("done", "active"));
+  document.getElementById("progressBarWrap").classList.remove("visible");
+  document.getElementById("progressBarFill").style.width = "0%";
+  document.getElementById("progressCounter").textContent = "";
+  document.getElementById("progressActivity").textContent = "\u00A0";
+  document.getElementById("progressEta").textContent = "";
+  document.getElementById("progressPills").innerHTML = "";
+  document.getElementById("keepaExhaustedBanner").classList.remove("visible");
 
   const config = buildConfig();
 
@@ -1642,6 +1886,35 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
 });
 
 const STAGE_ORDER = ["discovering", "scraping", "matching", "finalizing"];
+const STAGE_LABELS = {
+  discovering: "Discovering products",
+  scraping:    "Scraping supplier",
+  matching:    "Matching on Amazon",
+  finalizing:  "Applying your rules",
+};
+
+function fmtEta(sec) {
+  if (sec == null || sec < 0) return "";
+  if (sec < 60) return "~" + sec + "s left";
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return "~" + m + "m " + (s ? s + "s" : "") + " left";
+  const h = Math.floor(m / 60);
+  return "~" + h + "h " + (m % 60) + "m left";
+}
+
+function renderProgressPills(data) {
+  const pills = [];
+  if (data.urls_discovered != null) {
+    pills.push('<span class="pill">Discovered <strong>' +
+      data.urls_discovered + '</strong> URLs</span>');
+  }
+  if (data.keepa_tokens_left != null) {
+    const cls = data.keepa_tokens_left < 100 ? "pill warn" : "pill";
+    pills.push('<span class="' + cls + '">Keepa tokens <strong>' +
+      data.keepa_tokens_left + '</strong></span>');
+  }
+  document.getElementById("progressPills").innerHTML = pills.join("");
+}
 
 async function pollStatus(jobId) {
   try {
@@ -1652,6 +1925,7 @@ async function pollStatus(jobId) {
     const logEl = document.getElementById("logView");
     logEl.scrollTop = logEl.scrollHeight;
 
+    // Stage highlighting
     if (data.stage && STAGE_ORDER.includes(data.stage)) {
       const idx = STAGE_ORDER.indexOf(data.stage);
       STAGE_ORDER.forEach((s, i) => {
@@ -1662,12 +1936,38 @@ async function pollStatus(jobId) {
       });
     }
 
+    // Per-item progress bar
+    const barWrap = document.getElementById("progressBarWrap");
+    if (data.current != null && data.total != null && data.total > 0) {
+      barWrap.classList.add("visible");
+      const pct = Math.min(100, Math.round(100 * data.current / data.total));
+      document.getElementById("progressBarFill").style.width = pct + "%";
+      document.getElementById("progressCounter").textContent =
+        data.current + " / " + data.total;
+      document.getElementById("progressStageLabel").textContent =
+        STAGE_LABELS[data.stage] || "Working";
+      document.getElementById("progressEta").textContent =
+        fmtEta(data.eta_seconds);
+    }
+    if (data.current_activity) {
+      document.getElementById("progressActivity").textContent =
+        data.current_activity;
+    }
+
+    renderProgressPills(data);
+
+    if (data.keepa_exhausted) {
+      document.getElementById("keepaExhaustedBanner").classList.add("visible");
+    }
+
     if (data.status === "done") {
       STAGE_ORDER.forEach(s => {
         const el = document.querySelector('.stage[data-stage="' + s + '"]');
         el.classList.remove("active");
         el.classList.add("done");
       });
+      document.getElementById("progressBarFill").style.width = "100%";
+      document.getElementById("progressEta").textContent = "";
       setTimeout(() => showResults(jobId, data.summary), 400);
     } else if (data.status === "error") {
       showError(data.error || "Unknown error");

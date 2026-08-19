@@ -743,8 +743,15 @@ class Scraper:
         return self.parser.parse(html, url)
 
     def scrape_many(self, urls: Iterable[str]) -> list[Product]:
+        # Materialise so we know the total for progress reporting.
+        urls_list = list(urls)
+        total = len(urls_list)
         results: list[Product] = []
-        for url in urls:
+        for i, url in enumerate(urls_list, 1):
+            # Progress marker parsed by the web UI (webapp.py._append_log)
+            # to drive the live progress bar. Format is fragile-by-contract
+            # ("[N/M]" prefix) — keep it stable.
+            log.info("[%d/%d] Scraping product", i, total)
             p = self.scrape_one(url)
             if p:
                 results.append(p)
