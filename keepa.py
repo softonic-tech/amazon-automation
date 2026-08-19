@@ -59,6 +59,40 @@ class KeepaError(Exception):
     """Raised for Keepa API failures — auth errors, quota, malformed responses."""
 
 
+class KeepaTokenExhausted(KeepaError):
+    """
+    Raised when Keepa's rate limiter returns 429 and the refill wait would
+    be longer than the caller is willing to block for.
+
+    Callers (the enrichment loop) catch this specifically to save partial
+    progress rather than crashing the entire job — the user then gets an
+    Excel with the rows Keepa DID complete, and the rest marked
+    INCOMPLETE with a clear reason and refill ETA.
+    """
+
+    def __init__(self, refill_seconds: int | None = None,
+                 tokens_left: int | None = None):
+        self.refill_seconds = refill_seconds
+        self.tokens_left = tokens_left
+        parts = ["Keepa tokens exhausted"]
+        if tokens_left is not None:
+            parts.append(f"({tokens_left} left)")
+        if refill_seconds is not None:
+            mins = max(1, refill_seconds // 60)
+            parts.append(f"— refills in ~{mins} minute(s)")
+        super().__init__(" ".join(parts))
+
+
+# Cap how long a single 429 will make us sleep. If Keepa says the refill is
+# longer than this, we surface KeepaTokenExhausted immediately so the caller
+# can save partial results rather than tying up the worker for hours.
+MAX_429_WAIT_SECONDS = 90
+
+# Threshold below which we skip the (optional) title-search fallback to
+# preserve remaining tokens for essential UPC lookups.
+LOW_TOKEN_THRESHOLD = 50
+
+
 @dataclass
 class KeepaMatch:
     """Flattened, clean subset of a Keepa product record — what our pipeline uses."""
@@ -223,8 +257,26 @@ class KeepaClient:
         if query in self._search_cache:
             return self._search_cache[query]
 
+        # Preserve remaining tokens for essential UPC lookups when quota is
+        # running low. A /search call costs ~10 tokens; if we're that close
+        # to empty, skipping the optional fallback lets the primary UPC path
+        # finish rather than burning the last tokens on nice-to-have search.
+        if (self._tokens_left is not None
+                and self._tokens_left < LOW_TOKEN_THRESHOLD):
+            log.warning("Skipping Keepa title search for %r — only %d tokens "
+                        "left (< %d threshold). UPC lookups will continue.",
+                        query, self._tokens_left, LOW_TOKEN_THRESHOLD)
+            self._search_cache[query] = []
+            return []
+
         try:
             products = self._search_products(query)
+        except KeepaTokenExhausted:
+            # Tokens fully exhausted mid-search. Don't crash — return empty
+            # and let the caller decide what to do with UPC-only results.
+            log.warning("Keepa /search skipped for %r — tokens exhausted", query)
+            self._search_cache[query] = []
+            return []
         except KeepaError as e:
             log.warning("Keepa /search failed for %r: %s", query, e)
             return []
@@ -300,6 +352,45 @@ class KeepaClient:
 
     # ---- Internal HTTP ---------------------------------------------- #
 
+    def _handle_429(self, resp, endpoint: str = "") -> None:
+        """
+        Shared 429 handling for all Keepa endpoints.
+
+        - Parses `tokensLeft` and `refillIn` from the response body.
+        - Sleeps for the refill interval if it's short (< MAX_429_WAIT_SECONDS).
+        - Raises KeepaTokenExhausted if the wait would be longer than the cap,
+          so the caller can persist partial progress instead of tying up the
+          worker for hours waiting for a daily-quota refill.
+        """
+        refill_ms = 30000
+        tokens_left = 0
+        try:
+            body = resp.json()
+            refill_ms = int(body.get("refillIn", refill_ms) or refill_ms)
+            tokens_left = int(body.get("tokensLeft", 0) or 0)
+            # Track it on the client so callers can query self.tokens_left
+            # to short-circuit expensive optional calls (title search).
+            self._tokens_left = tokens_left
+            self._refill_ms = refill_ms
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+        refill_s = max(1, refill_ms // 1000 + 1)
+        if refill_s > MAX_429_WAIT_SECONDS:
+            log.error(
+                "Keepa %s: tokens exhausted (%d left), refill in %ds (~%dmin) "
+                "> cap %ds — surfacing to caller so partial results can be saved",
+                endpoint or "API", tokens_left, refill_s, refill_s // 60,
+                MAX_429_WAIT_SECONDS,
+            )
+            raise KeepaTokenExhausted(
+                refill_seconds=refill_s, tokens_left=tokens_left
+            )
+
+        log.warning("Keepa %s rate-limited (429, %d tokens left), waiting %ss …",
+                    endpoint or "API", tokens_left, refill_s)
+        time.sleep(refill_s)
+
     def _get_products(self, **params) -> list[dict]:
         """
         Call /product with our defaults + provided identifiers.
@@ -332,17 +423,8 @@ class KeepaClient:
                 return data.get("products") or []
 
             if resp.status_code == 429:
-                # Out of tokens — wait for refill, then retry.
-                wait_s = 30
-                try:
-                    body = resp.json()
-                    if "refillIn" in body:
-                        wait_s = max(5, int(body["refillIn"] / 1000) + 1)
-                except json.JSONDecodeError:
-                    pass
-                log.warning("Keepa rate-limited (429), waiting %ss …", wait_s)
-                time.sleep(wait_s)
-                continue
+                self._handle_429(resp, endpoint="/product")
+                continue  # brief wait done, retry
 
             if resp.status_code in (401, 403):
                 raise KeepaError(f"Auth failed ({resp.status_code}): "
@@ -392,15 +474,7 @@ class KeepaClient:
                 return data.get("products") or []
 
             if resp.status_code == 429:
-                wait_s = 30
-                try:
-                    body = resp.json()
-                    if "refillIn" in body:
-                        wait_s = max(5, int(body["refillIn"] / 1000) + 1)
-                except json.JSONDecodeError:
-                    pass
-                log.warning("Keepa /search rate-limited (429), waiting %ss …", wait_s)
-                time.sleep(wait_s)
+                self._handle_429(resp, endpoint="/search")
                 continue
 
             if resp.status_code in (401, 403):
@@ -441,15 +515,7 @@ class KeepaClient:
                 return data.get("sellers") or {}
 
             if resp.status_code == 429:
-                wait_s = 30
-                try:
-                    body = resp.json()
-                    if "refillIn" in body:
-                        wait_s = max(5, int(body["refillIn"] / 1000) + 1)
-                except json.JSONDecodeError:
-                    pass
-                log.warning("Keepa /seller rate-limited (429), waiting %ss …", wait_s)
-                time.sleep(wait_s)
+                self._handle_429(resp, endpoint="/seller")
                 continue
 
             if resp.status_code in (401, 403):

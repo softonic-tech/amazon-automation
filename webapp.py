@@ -174,6 +174,8 @@ def _make_job(mode: str) -> str:
             "output_file": None,
             "summary": None,
             "created_at": time.time(),
+            "keepa_exhausted": False,   # sticky flag; set from log scan
+            "keepa_tokens_left": None,  # last known token balance
         }
     return job_id
 
@@ -192,10 +194,23 @@ def _append_log(job_id: str, line: str) -> None:
             job["stage"] = "discovering"
         elif "fetching" in low:
             job["stage"] = "scraping"
-        elif "keepa" in low and "lookup" in low:
+        elif "keepa" in low and ("lookup" in low or "upc" in low or "title search" in low):
             job["stage"] = "matching"
         elif "sourcing done" in low:
             job["stage"] = "finalizing"
+
+        # Surface Keepa quota-exhaustion state to the UI so users see a
+        # dedicated warning banner instead of just a confusing "some rows
+        # rejected" message.
+        if "keepa quota exhausted" in low or "keepa tokens exhausted" in low:
+            job["keepa_exhausted"] = True
+        # Track live token balance from lines like
+        # "[15/25] Keepa tokens remaining: 187"
+        if "keepa tokens remaining:" in low:
+            try:
+                job["keepa_tokens_left"] = int(line.rsplit(":", 1)[1].strip())
+            except (ValueError, IndexError):
+                pass
 
 
 def _mark_status(job_id: str, status: str, **extra) -> None:
@@ -454,6 +469,8 @@ def api_status(job_id: str):
             "log_count": len(job["log"]),
             "error": job["error"],
             "summary": job["summary"],
+            "keepa_exhausted": job.get("keepa_exhausted", False),
+            "keepa_tokens_left": job.get("keepa_tokens_left"),
         })
 
 

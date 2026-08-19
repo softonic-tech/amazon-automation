@@ -320,13 +320,48 @@ def enrich_rows_with_keepa(
         and hasattr(keepa_client, "search_by_brand_title")
     )
 
+    # Import lazily so keepa.py stays importable in unit-test contexts where
+    # `requests` isn't installed.
+    try:
+        from keepa import KeepaTokenExhausted
+    except ImportError:  # pragma: no cover
+        class KeepaTokenExhausted(Exception):  # type: ignore
+            refill_seconds = None
+
+    tokens_exhausted = False  # sticky flag: once tripped, skip remaining Keepa calls
+    exhausted_refill_s: int | None = None
+
     for i, row in enumerate(rows, 1):
+        # If tokens ran out on an earlier row, don't hit Keepa again —
+        # mark this row INCOMPLETE and keep going. The job still finishes
+        # with a valid Excel; the rows we DID complete are all real data.
+        if tokens_exhausted:
+            reason = "Keepa tokens exhausted mid-run"
+            if exhausted_refill_s:
+                mins = max(1, exhausted_refill_s // 60)
+                reason += f" — refills in ~{mins}min"
+            row.reject_reasons = _append_reason(row.reject_reasons, reason)
+            row.status = "INCOMPLETE"
+            enriched.append(row)
+            continue
+
         # STEP 1 — UPC lookup (fast, exact when it works).
         upc_matches = []
         if row.upc:
             log.info("[%d/%d] Keepa UPC %s", i, len(rows), row.upc)
             try:
                 upc_matches = keepa_client.lookup_all_by_upc(row.upc)
+            except KeepaTokenExhausted as e:
+                log.error("Keepa tokens exhausted at row %d/%d — saving "
+                          "partial results and marking remaining rows "
+                          "INCOMPLETE", i, len(rows))
+                tokens_exhausted = True
+                exhausted_refill_s = getattr(e, "refill_seconds", None)
+                reason = f"Keepa tokens exhausted before this row: {e}"
+                row.reject_reasons = _append_reason(row.reject_reasons, reason)
+                row.status = "INCOMPLETE"
+                enriched.append(row)
+                continue
             except Exception as e:  # noqa: BLE001
                 log.warning("Keepa UPC error for %s: %s", row.upc, e)
                 row.reject_reasons = _append_reason(
@@ -350,6 +385,12 @@ def enrich_rows_with_keepa(
                 search_matches = keepa_client.search_by_brand_title(
                     brand=row.brand, title=row.zoro_title, limit=8,
                 )
+            except KeepaTokenExhausted as e:
+                log.warning("Keepa tokens exhausted during title search — "
+                            "continuing with UPC results only for remainder")
+                tokens_exhausted = True
+                exhausted_refill_s = getattr(e, "refill_seconds", None)
+                # Do NOT continue — we still have UPC matches to process
             except Exception as e:  # noqa: BLE001
                 log.warning("Keepa title search error for '%s' / '%s': %s",
                             row.brand, (row.zoro_title or "")[:40], e)
@@ -416,6 +457,13 @@ def enrich_rows_with_keepa(
             # subsequent variations in ranked order below it.
             enriched.append(target)
 
+        # Live token-balance heartbeat every 10 rows or so. Gives operators
+        # a real-time signal of how fast the quota is draining without
+        # spamming the log.
+        tokens = getattr(keepa_client, "tokens_left", None)
+        if tokens is not None and (i % 10 == 0 or tokens < 100):
+            log.info("[%d/%d] Keepa tokens remaining: %d", i, len(rows), tokens)
+
     if total_variations:
         log.info("Fanned out %d extra Amazon variation row(s) across %d supplier product(s)",
                  total_variations, len(rows))
@@ -437,10 +485,21 @@ def enrich_rows_with_keepa(
             # never mysteriously blank when we know a Buy Box seller exists.
             r.ships_from = names.get(sid) or sid
 
-    # Report Keepa balance
+    # Final status summary — surfaces prominently in job logs and the UI.
     tokens = getattr(keepa_client, "tokens_left", None)
     if tokens is not None:
         log.info("Keepa tokens remaining: %d", tokens)
+    if tokens_exhausted:
+        incomplete_count = sum(1 for r in enriched if r.status == "INCOMPLETE"
+                               and "Keepa tokens exhausted" in (r.reject_reasons or ""))
+        completed_count = len(enriched) - incomplete_count
+        refill_msg = ""
+        if exhausted_refill_s:
+            mins = max(1, exhausted_refill_s // 60)
+            refill_msg = f" (Keepa refills in ~{mins}min — retry then)"
+        log.warning("KEEPA QUOTA EXHAUSTED: completed %d rows fully, %d rows "
+                    "marked INCOMPLETE.%s", completed_count, incomplete_count,
+                    refill_msg)
 
     return enriched
 
