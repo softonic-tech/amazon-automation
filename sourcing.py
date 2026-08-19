@@ -371,16 +371,30 @@ def enrich_rows_with_keepa(
                 enriched.append(row)
                 continue
 
-        # STEP 2 — title/brand search fallback. Catches:
-        #   * Products where iHerb has no UPC in JSON-LD
-        #   * Amazon ASINs with UPC list = [] (seller never registered a
-        #     barcode) — e.g. B0BLHRM711 Alter Eco Granola 6-pack
-        #   * Additional variations Amazon linked under different UPCs
+        # STEP 2 — title/brand search fallback.
+        #
+        # Only runs when UPC lookup returned NOTHING. Purpose is to rescue
+        # rows the barcode path can't reach, such as:
+        #   * Products where the supplier page has no UPC in JSON-LD
+        #   * Amazon ASINs with an empty UPC list (seller never registered
+        #     a barcode) — e.g. B0BLHRM711 Alter Eco Granola 6-pack
+        #
+        # We intentionally do NOT merge search results on top of successful
+        # UPC hits. Doing that pulls in unrelated same-brand products (they
+        # share the brand but have different UPCs), which is what the
+        # Kerasal UPC 851409007516 case exposed — UPC found 2 ASINs, title
+        # search added 6 unrelated Kerasal products, producing 8 rows for
+        # a supplier SKU that has 2 real Amazon matches.
         search_matches = []
-        if title_search_enabled and row.brand and row.zoro_title:
-            if not row.upc:
-                log.info("[%d/%d] Keepa title search '%s' (no UPC)",
-                         i, len(rows), row.brand)
+        need_search_fallback = (
+            title_search_enabled
+            and not upc_matches
+            and row.brand
+            and row.zoro_title
+        )
+        if need_search_fallback:
+            log.info("[%d/%d] Keepa title search '%s' (no UPC match)",
+                     i, len(rows), row.brand)
             try:
                 search_matches = keepa_client.search_by_brand_title(
                     brand=row.brand, title=row.zoro_title, limit=8,
@@ -390,13 +404,14 @@ def enrich_rows_with_keepa(
                             "continuing with UPC results only for remainder")
                 tokens_exhausted = True
                 exhausted_refill_s = getattr(e, "refill_seconds", None)
-                # Do NOT continue — we still have UPC matches to process
+                # Do NOT continue — we still process this row (empty matches)
             except Exception as e:  # noqa: BLE001
                 log.warning("Keepa title search error for '%s' / '%s': %s",
                             row.brand, (row.zoro_title or "")[:40], e)
 
-        # Merge UPC + search results, dedupe by ASIN (UPC hits first so
-        # they win rank order — they're the strongest identity signal).
+        # Because search only runs when UPC returned nothing, merging is
+        # trivial — one of the two lists is always empty. Dedupe by ASIN
+        # is still cheap defence against Keepa returning duplicates.
         seen_asins: set[str] = set()
         matches = []
         for m in upc_matches + search_matches:
@@ -408,28 +423,25 @@ def enrich_rows_with_keepa(
         matches = matches[:15]
 
         if not matches:
-            if not row.upc and not row.brand:
+            tried = []
+            if row.upc:
+                tried.append("UPC")
+            if need_search_fallback:
+                tried.append("title search")
+            if not tried:
                 reason = "no UPC and no brand/title on supplier product"
-            elif row.upc:
-                reason = "no Amazon match (tried UPC + title search)"
             else:
-                reason = "no Amazon match for brand/title"
+                reason = f"no Amazon match (tried {' + '.join(tried)})"
             row.reject_reasons = _append_reason(row.reject_reasons, reason)
             row.status = "Rejected"
             enriched.append(row)
             continue
 
-        # Diagnostic: how many ASINs came from search that UPC alone missed?
-        upc_asins = {m.asin for m in upc_matches}
-        search_only = [m for m in search_matches if m.asin not in upc_asins]
-        if search_only and not upc_matches:
-            total_via_search_only += len(search_only)
+        if search_matches:
+            total_via_search_only += len(search_matches)
             log.info("  → title search rescued %d ASIN(s) (no UPC match): %s",
-                     len(search_only), ", ".join(m.asin for m in search_only[:3]))
-        elif search_only:
-            total_via_search_only += len(search_only)
-            log.info("  → title search added %d extra ASIN(s) on top of UPC: %s",
-                     len(search_only), ", ".join(m.asin for m in search_only[:3]))
+                     len(search_matches),
+                     ", ".join(m.asin for m in search_matches[:3]))
 
         if len(matches) > 1:
             total_variations += len(matches) - 1
