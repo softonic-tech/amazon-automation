@@ -642,8 +642,10 @@ LOGIN_HTML = r"""
     body {
       font-family: var(--sans);
       background:
-        radial-gradient(1200px 600px at 50% -20%,
-          rgba(28, 62, 54, 0.06) 0%, transparent 60%),
+        radial-gradient(900px 480px at 50% -12%,
+          rgba(28, 62, 54, 0.08) 0%, transparent 55%),
+        radial-gradient(700px 400px at 100% 100%,
+          rgba(184, 122, 24, 0.06) 0%, transparent 50%),
         var(--paper);
       color: var(--ink);
       line-height: 1.5;
@@ -656,6 +658,7 @@ LOGIN_HTML = r"""
       min-height: 100vh;
       padding: 24px;
     }
+    ::selection { background: var(--brand-soft); color: var(--brand); }
     @keyframes rise-login {
       from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: none; }
@@ -675,14 +678,15 @@ LOGIN_HTML = r"""
       margin-bottom: 32px;
     }
     .brand-mark {
-      width: 40px; height: 40px;
+      width: 42px; height: 42px;
       display: flex; align-items: center; justify-content: center;
       background: var(--brand);
       color: var(--paper);
-      border-radius: 3px;
+      border-radius: 8px;
       font-family: var(--serif);
       font-size: 22px;
       line-height: 1;
+      box-shadow: 0 4px 12px -4px rgba(28, 62, 54, 0.45);
     }
     .brand-text .name {
       font-family: var(--serif);
@@ -806,7 +810,7 @@ LOGIN_HTML = r"""
       background: var(--rejected-soft);
       border: 1px solid rgba(154, 63, 44, 0.25);
       color: var(--rejected);
-      border-radius: 3px;
+      border-radius: 6px;
       padding: 10px 14px;
       font-size: 13px;
       margin: 0 0 4px;
@@ -912,16 +916,23 @@ INDEX_HTML = r"""
 
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
       font-family: var(--sans);
-      background: var(--paper);
+      background:
+        radial-gradient(1100px 520px at 12% -8%,
+          rgba(28, 62, 54, 0.07) 0%, transparent 58%),
+        radial-gradient(800px 460px at 100% 0%,
+          rgba(184, 122, 24, 0.05) 0%, transparent 48%),
+        var(--paper);
       color: var(--ink);
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
-      font-feature-settings: "ss01", "cv11";  /* Inter alt digits + humanized 1/l */
+      font-feature-settings: "ss01", "cv11";
     }
+    ::selection { background: var(--brand-soft); color: var(--brand); }
     .serif { font-family: var(--serif); }
 
     /* Smooth reveal for the main workflow cards. */
@@ -943,19 +954,20 @@ INDEX_HTML = r"""
       display: flex;
       align-items: center;
       gap: 12px;
-      padding-bottom: 32px;
+      padding-bottom: 28px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 48px;
+      margin-bottom: 44px;
     }
     .brand-mark {
-      width: 34px; height: 34px;
+      width: 38px; height: 38px;
       display: flex; align-items: center; justify-content: center;
       background: var(--brand);
       color: var(--paper);
-      border-radius: 2px;
+      border-radius: 8px;
       font-family: var(--serif);
       font-size: 20px;
       line-height: 1;
+      box-shadow: 0 4px 10px -4px rgba(28, 62, 54, 0.45);
     }
     .brand-text .name {
       font-family: var(--serif);
@@ -987,9 +999,9 @@ INDEX_HTML = r"""
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-weight: 600;
-      padding: 6px 10px;
+      padding: 7px 12px;
       border: 1px solid var(--border-strong);
-      border-radius: 3px;
+      border-radius: 999px;
       transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
     }
     .signout:hover {
@@ -1176,8 +1188,11 @@ INDEX_HTML = r"""
 
     details.advanced {
       border-top: 1px solid var(--border);
-      margin: 32px -32px 0;
-      padding: 0 32px;
+      margin: 32px -36px 0;
+      padding: 0 36px;
+    }
+    @media (max-width: 560px) {
+      details.advanced { margin: 32px -24px 0; padding: 0 24px; }
     }
     details.advanced summary {
       cursor: pointer;
@@ -1195,16 +1210,16 @@ INDEX_HTML = r"""
     details.advanced summary::before {
       content: "+";
       display: inline-block;
-      width: 18px; height: 18px;
+      width: 20px; height: 20px;
       background: var(--brand);
       color: var(--paper);
-      border-radius: 2px;
+      border-radius: 5px;
       text-align: center;
-      line-height: 17px;
+      line-height: 19px;
       font-weight: 700;
       font-size: 14px;
     }
-    details.advanced[open] summary::before { content: "-"; }
+    details.advanced[open] summary::before { content: "\2212"; }
 
     .advanced-body {
       padding-bottom: 24px;
@@ -1227,18 +1242,22 @@ INDEX_HTML = r"""
       font-weight: 600;
     }
     .adv-group input[type="number"] {
-      background: var(--paper);
+      background: #FBF8F0;
       border: 1px solid var(--border-strong);
-      border-radius: 2px;
-      padding: 8px 10px;
+      border-radius: 4px;
+      padding: 9px 11px;
       font-size: 14px;
       color: var(--ink);
       font-family: inherit;
+      transition: border-color 0.15s ease, background 0.15s ease,
+                  box-shadow 0.15s ease;
     }
+    .adv-group input:hover { border-color: var(--graphite); }
     .adv-group input:focus {
       outline: none;
       border-color: var(--brand);
-      background: white;
+      background: #fff;
+      box-shadow: 0 0 0 3px var(--brand-soft);
     }
     .adv-check {
       display: flex;
@@ -1540,7 +1559,7 @@ INDEX_HTML = r"""
       border-left: 4px solid #F59E0B;
       color: #78350F;
       padding: 12px 16px;
-      border-radius: 2px;
+      border-radius: 6px;
       margin-bottom: 16px;
       font-size: 13px;
       line-height: 1.5;
@@ -1548,6 +1567,20 @@ INDEX_HTML = r"""
     .banner-warn.visible { display: block; }
     .banner-warn strong { color: #78350F; }
 
+    .log-shell {
+      position: relative;
+    }
+    .log-shell::before {
+      content: "Live log";
+      display: block;
+      font-family: var(--sans);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #8A8374;
+      padding: 0 0 8px;
+    }
     .log-view {
       background: #171E1B;
       color: #C9C0AB;
@@ -1841,7 +1874,7 @@ INDEX_HTML = r"""
     .error-box {
       background: var(--rejected-soft);
       border: 1px solid var(--rejected);
-      border-radius: 2px;
+      border-radius: 6px;
       padding: 16px 20px;
       margin-bottom: 20px;
       color: var(--rejected);
@@ -1854,7 +1887,7 @@ INDEX_HTML = r"""
     .error-box strong {
       display: block;
       margin-bottom: 8px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: var(--sans);
     }
   </style>
 </head>
@@ -2055,7 +2088,9 @@ INDEX_HTML = r"""
 
     <div class="progress-pills" id="progressPills"></div>
 
-    <div class="log-view" id="logView"></div>
+    <div class="log-shell">
+      <div class="log-view" id="logView"></div>
+    </div>
   </div>
 
   <div class="results-card" id="resultsCard">
