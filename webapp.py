@@ -1793,12 +1793,19 @@ INDEX_HTML = r"""
             <div class="field">
               <label for="brands">Focus on brands <span class="opt">(optional)</span></label>
               <input type="text" id="brands" placeholder='e.g., Now Foods, Jarrow Formulas'>
-              <div class="field-hint">Comma-separated. Only products from these brands will be scraped.</div>
+              <div class="field-hint">
+                Comma-separated. Only products from these brands will be scraped.
+                For iHerb, the tool uses the brand listing with iHerb's own
+                <em>In-stock</em> filter, then double-checks each product page.
+              </div>
             </div>
             <div class="field">
-              <label>&nbsp;</label>
-              <div class="field-hint" style="padding-top: 8px;">
-                For iHerb, the tool uses the brand listing with iHerb's own <em>In-stock</em> filter, then double-checks each product page.
+              <label for="extra_cost">Supplier shipping <span class="opt">($ / unit)</span></label>
+              <input type="number" id="extra_cost" step="0.01" min="0" value="0"
+                     placeholder="e.g., 5">
+              <div class="field-hint">
+                Deducted from profit per unit, like the Amazon fee.
+                iHerb typically charges ~$5; Zoro is free.
               </div>
             </div>
           </div>
@@ -2028,6 +2035,7 @@ function buildConfig() {
   const maxBsr = val("max_bsr");
   return {
     fee_pct: val("fee_pct") / 100,
+    extra_cost: val("extra_cost"),
     min_profit: val("min_profit"),
     min_margin: val("min_margin") / 100,
     min_roi: val("min_roi") / 100,
