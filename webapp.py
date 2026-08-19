@@ -188,6 +188,16 @@ def _make_job(mode: str) -> str:
             "_eta_stage": None,
             "_eta_start_time": None,
             "_eta_start_count": None,
+            # "Why did I only get N products?" context — captured at job start
+            # and populated as the crawl discovers what the catalog actually
+            # holds. Used to render a friendly info banner in the UI so users
+            # don't think a small niche-brand result count is a bug.
+            "requested_limit": None,     # what the user asked for
+            "requested_brands": None,    # comma-separated brand names, or None
+            "requested_source": None,    # hostname, e.g. "www.iherb.com"
+            "catalog_size": None,        # actual URLs the catalog returned
+            "catalog_notice": None,      # human-friendly shortfall explanation
+            "brand_not_found": None,     # brand name if iHerb had no listing page
         }
     return job_id
 
@@ -204,6 +214,27 @@ _RE_URLS_KEPT = re.compile(r"(\d+) remain(?:ing)?(?:\s+for scraping)?",
                            re.IGNORECASE)
 _RE_TOKENS = re.compile(r"Keepa tokens remaining:\s*(\d+)", re.IGNORECASE)
 _RE_FETCHING = re.compile(r"Fetching\s+(https?://\S+)")
+
+# Catalog-shortfall signals. Emitted by scraper._collect_iherb_brand_listing_urls
+# and the qualifying-products post-filter. Used to tell the user WHY they got
+# fewer products than requested (usually: the brand has a tiny catalog).
+_RE_IHERB_BRAND_COLLECTED = re.compile(
+    r"iHerb brand listing collected (\d+) URL", re.IGNORECASE,
+)
+_RE_IHERB_BRAND_YIELDED = re.compile(
+    r"iHerb brand\+stock listing yielded (\d+) URL", re.IGNORECASE,
+)
+# scraper.py logs the brand via %r, which produces single-quoted strings
+# normally but switches to double quotes when the value contains an
+# apostrophe (e.g. "Bob's Red Mill"). Match either style so multi-word
+# brands aren't truncated at the first space.
+_RE_IHERB_BRAND_MISSING = re.compile(
+    r"""No iHerb listing page for brand (?:'([^']+)'|"([^"]+)")""",
+    re.IGNORECASE,
+)
+_RE_ONLY_FOUND = re.compile(
+    r"Only found (\d+) qualifying products \(target: (\d+)\)", re.IGNORECASE,
+)
 
 
 def _summarize_step(rest: str) -> str:
@@ -318,6 +349,66 @@ def _append_log(job_id: str, line: str) -> None:
                 url = fm.group(1)
                 slug = url.rstrip("/").split("/")[-2 if url.endswith("/") else -1]
                 job["current_activity"] = f"Fetching {slug[:60]}"
+
+        # --- Catalog-shortfall detection ---
+        # These branches populate `catalog_size` and `catalog_notice` so the UI
+        # can render an amber "you asked for N, catalog only has M" banner.
+        # Whenever any of the shortfall signals fires we recompute the notice
+        # from the latest known figures.
+        m = (_RE_IHERB_BRAND_COLLECTED.search(line)
+             or _RE_IHERB_BRAND_YIELDED.search(line))
+        if m:
+            try:
+                job["catalog_size"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+        m = _RE_IHERB_BRAND_MISSING.search(line)
+        if m:
+            job["brand_not_found"] = (m.group(1) or m.group(2) or "").strip()
+        m = _RE_ONLY_FOUND.search(line)
+        if m:
+            try:
+                job["catalog_size"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+
+        _refresh_catalog_notice(job)
+
+
+def _refresh_catalog_notice(job: dict) -> None:
+    """
+    Build a one-liner explaining any gap between requested and available
+    products. Called after every log line that touches catalog signals so
+    the UI can show the notice as soon as the crawler knows the truth.
+    """
+    requested = job.get("requested_limit")
+    brands = job.get("requested_brands")
+    source = job.get("requested_source") or "the supplier"
+    brand_missing = job.get("brand_not_found")
+
+    if brand_missing:
+        job["catalog_notice"] = (
+            f"No listing page found on {source} for '{brand_missing}'. "
+            "Check the spelling exactly as it appears on the retailer's site, "
+            "or try a broader brand slug (e.g. 'Bob's Red Mill' vs 'Bobs Red Mill')."
+        )
+        return
+
+    available = job.get("catalog_size")
+    if requested is None or available is None:
+        return
+    if available >= requested:
+        # No shortfall — clear any stale notice.
+        job["catalog_notice"] = None
+        return
+
+    who = brands if brands else "this filter"
+    job["catalog_notice"] = (
+        f"{source} only lists {available} in-stock product"
+        f"{'s' if available != 1 else ''} for {who}. "
+        f"You asked for {requested}, so {available} is the entire "
+        f"available catalog — not a tool limit."
+    )
 
 
 def _mark_status(job_id: str, status: str, **extra) -> None:
@@ -471,6 +562,20 @@ def _job_scrape_and_analyze(job_id: str, params: dict) -> None:
 
         out_path = WORK_DIR / f"{job_id}_result.xlsx"
 
+        # Stash user-facing job context so the UI can explain "why N instead
+        # of M?" the moment the crawler reports actual catalog size.
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job is not None:
+                job["requested_limit"] = int(params.get("limit") or 0) or None
+                job["requested_brands"] = (params.get("brands") or "").strip() or None
+                try:
+                    from urllib.parse import urlparse
+                    host = urlparse(params.get("sitemap_url", "")).netloc
+                    job["requested_source"] = host or None
+                except Exception:  # noqa: BLE001
+                    job["requested_source"] = None
+
         args = [
             "--sitemap", params["sitemap_url"],
             "--limit", str(params["limit"]),
@@ -584,6 +689,10 @@ def api_status(job_id: str):
             "urls_discovered": job.get("urls_discovered"),
             "urls_after_filter": job.get("urls_after_filter"),
             "eta_seconds": job.get("eta_seconds"),
+            "requested_limit": job.get("requested_limit"),
+            "requested_brands": job.get("requested_brands"),
+            "catalog_size": job.get("catalog_size"),
+            "catalog_notice": job.get("catalog_notice"),
         })
 
 
@@ -1472,6 +1581,30 @@ INDEX_HTML = r"""
     .banner-warn.visible { display: block; }
     .banner-warn strong { color: #F3D56A; }
 
+    /* Informational banner — softer than the amber warn banner. Used for
+       "catalog only has N products for this brand" so users understand a
+       small result count isn't a bug. */
+    .banner-info {
+      display: none;
+      background: rgba(96, 165, 250, 0.08);
+      border: 1px solid rgba(96, 165, 250, 0.28);
+      border-left: 4px solid #60A5FA;
+      color: #C7DCFF;
+      padding: 12px 16px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .banner-info.visible { display: block; }
+    .banner-info strong { color: #E8F0FF; }
+    .banner-info .hint {
+      display: block;
+      margin-top: 4px;
+      color: rgba(199, 220, 255, 0.72);
+      font-size: 12px;
+    }
+
     .log-shell { position: relative; }
     .log-shell::before {
       content: "Live log";
@@ -1786,6 +1919,10 @@ INDEX_HTML = r"""
             <div class="field">
               <label for="limit">Products to analyze</label>
               <input type="number" id="limit" name="limit" value="25" min="1" max="500">
+              <div class="field-hint">
+                Upper limit. If you filter by a niche brand, the actual result
+                count is capped by the brand's in-stock catalog on that supplier.
+              </div>
             </div>
           </div>
 
@@ -1931,6 +2068,11 @@ INDEX_HTML = r"""
       Keepa refills your token bucket.
     </div>
 
+    <div class="banner-info" id="catalogNoticeBanner">
+      <strong>Heads up</strong>
+      <span id="catalogNoticeText"></span>
+    </div>
+
     <div class="progress-bar-wrap" id="progressBarWrap">
       <div class="progress-header">
         <span class="label" id="progressStageLabel">Working</span>
@@ -1965,6 +2107,11 @@ INDEX_HTML = r"""
         Some products couldn't be fully analysed and are marked
         <em>INCOMPLETE</em> in the spreadsheet. Re-run in a few minutes to
         finish them once your token bucket refills.
+      </div>
+
+      <div class="banner-info" id="resultsCatalogNoticeBanner">
+        <strong>About your result count</strong>
+        <span id="resultsCatalogNoticeText"></span>
       </div>
 
       <h2>Analysis <em>complete</em></h2>
@@ -2106,6 +2253,7 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
   document.getElementById("progressEta").textContent = "";
   document.getElementById("progressPills").innerHTML = "";
   document.getElementById("keepaExhaustedBanner").classList.remove("visible");
+  document.getElementById("catalogNoticeBanner").classList.remove("visible");
 
   const config = buildConfig();
 
@@ -2209,6 +2357,18 @@ async function pollStatus(jobId) {
       document.getElementById("keepaExhaustedBanner").classList.add("visible");
     }
 
+    // Catalog-shortfall notice — surfaces the moment the crawler reports
+    // how many products the brand catalog actually contains, so a "5 of 25"
+    // result doesn't look like a bug.
+    const catBanner = document.getElementById("catalogNoticeBanner");
+    if (data.catalog_notice) {
+      document.getElementById("catalogNoticeText").textContent =
+        " — " + data.catalog_notice;
+      catBanner.classList.add("visible");
+    } else {
+      catBanner.classList.remove("visible");
+    }
+
     if (data.status === "done") {
       STAGE_ORDER.forEach(s => {
         const el = document.querySelector('.stage[data-stage="' + s + '"]');
@@ -2254,6 +2414,17 @@ function showResults(jobId, summary, status) {
     exhaustedBanner.classList.add("visible");
   } else {
     exhaustedBanner.classList.remove("visible");
+  }
+
+  // Persist the catalog-shortfall notice into the results card so users
+  // still see "why only 5?" after the progress card collapses.
+  const catBanner = document.getElementById("resultsCatalogNoticeBanner");
+  if (status && status.catalog_notice) {
+    document.getElementById("resultsCatalogNoticeText").textContent =
+      " — " + status.catalog_notice;
+    catBanner.classList.add("visible");
+  } else {
+    catBanner.classList.remove("visible");
   }
 
   const byStatus = summary.by_status || {};
@@ -2336,6 +2507,7 @@ function showError(msg) {
   document.getElementById("statRow").innerHTML = "";
   document.getElementById("resultsMeta").innerHTML = "";
   document.getElementById("resultsKeepaExhaustedBanner").classList.remove("visible");
+  document.getElementById("resultsCatalogNoticeBanner").classList.remove("visible");
   document.getElementById("downloadCta").style.display = "none";
   document.getElementById("approvedSection").style.display = "none";
   document.getElementById("reasonsSection").style.display = "none";
