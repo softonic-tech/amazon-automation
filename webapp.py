@@ -611,7 +611,10 @@ LOGIN_HTML = r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in — Sourcing</title>
+  <title>Sign in - Sourcing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <style>
     :root {
       --paper:        #F7F4EC;
@@ -627,23 +630,37 @@ LOGIN_HTML = r"""
       --brand-soft:   #E8EEE9;
       --rejected:     #9A3F2C;
       --rejected-soft:#F0DDD5;
+
+      --sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+      --serif: "Instrument Serif", "Iowan Old Style", "Palatino Linotype",
+               Georgia, serif;
     }
 
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                   Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: var(--paper);
+      font-family: var(--sans);
+      background:
+        radial-gradient(1200px 600px at 50% -20%,
+          rgba(28, 62, 54, 0.06) 0%, transparent 60%),
+        var(--paper);
       color: var(--ink);
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
       display: flex;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
       padding: 24px;
     }
+    @keyframes rise-login {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: none; }
+    }
+    .stage { animation: rise-login 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
     .stage {
       width: 100%;
@@ -663,12 +680,12 @@ LOGIN_HTML = r"""
       background: var(--brand);
       color: var(--paper);
       border-radius: 3px;
-      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-family: var(--serif);
       font-size: 22px;
       line-height: 1;
     }
     .brand-text .name {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 20px;
       font-weight: 600;
       letter-spacing: -0.01em;
@@ -683,19 +700,20 @@ LOGIN_HTML = r"""
     .card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 40px 36px 32px;
-      box-shadow: 0 1px 0 rgba(28, 27, 26, 0.03),
-                  0 8px 24px rgba(28, 27, 26, 0.04);
+      border-radius: 10px;
+      padding: 44px 40px 36px;
+      box-shadow: 0 1px 0 rgba(28, 27, 26, 0.04),
+                  0 8px 24px -8px rgba(28, 27, 26, 0.08),
+                  0 24px 60px -16px rgba(28, 27, 26, 0.12);
     }
 
     h1.title {
-      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      font-size: 28px;
+      font-family: var(--serif);
+      font-size: 34px;
       font-weight: 400;
-      line-height: 1.2;
+      line-height: 1.15;
       letter-spacing: -0.02em;
-      margin: 0 0 6px;
+      margin: 0 0 8px;
     }
     h1.title em {
       font-style: italic;
@@ -703,8 +721,9 @@ LOGIN_HTML = r"""
     }
     .subtitle {
       color: var(--graphite);
-      font-size: 14px;
-      margin: 0 0 28px;
+      font-size: 14.5px;
+      margin: 0 0 30px;
+      line-height: 1.5;
     }
 
     form { display: flex; flex-direction: column; gap: 18px; }
@@ -720,19 +739,22 @@ LOGIN_HTML = r"""
     .field input {
       appearance: none;
       -webkit-appearance: none;
-      background: var(--paper);
+      background: #FBF8F0;
       border: 1px solid var(--border-strong);
-      border-radius: 3px;
+      border-radius: 4px;
       padding: 12px 14px;
       font: inherit;
       font-size: 15px;
       color: var(--ink);
-      transition: border-color 0.12s ease, background 0.12s ease;
+      transition: border-color 0.12s ease, background 0.12s ease,
+                  box-shadow 0.12s ease;
     }
+    .field input:hover { border-color: var(--graphite); }
     .field input:focus {
       outline: none;
       border-color: var(--brand);
       background: #fff;
+      box-shadow: 0 0 0 3px var(--brand-soft);
     }
 
     .remember {
@@ -754,21 +776,30 @@ LOGIN_HTML = r"""
       background: var(--brand);
       color: var(--paper);
       border: none;
-      border-radius: 3px;
-      padding: 13px 20px;
+      border-radius: 4px;
+      padding: 14px 20px;
       font: inherit;
       font-size: 15px;
       font-weight: 600;
       letter-spacing: 0.01em;
       cursor: pointer;
-      transition: background 0.12s ease;
-      margin-top: 4px;
+      margin-top: 6px;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.12),
+                  0 4px 12px -4px rgba(28, 62, 54, 0.35);
+      transition: background 0.15s ease, transform 0.15s ease,
+                  box-shadow 0.15s ease;
     }
-    button.submit:hover { background: var(--brand-hover); }
-    button.submit:active { transform: translateY(1px); }
+    button.submit:hover {
+      background: var(--brand-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.12),
+                  0 8px 20px -4px rgba(28, 62, 54, 0.45);
+    }
+    button.submit:active { transform: translateY(0); }
     button.submit:focus-visible {
-      outline: 2px solid var(--brand);
-      outline-offset: 2px;
+      outline: none;
+      box-shadow: 0 0 0 3px var(--brand-soft),
+                  0 0 0 5px var(--brand);
     }
 
     .error {
@@ -838,6 +869,9 @@ INDEX_HTML = r"""
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sourcing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <style>
     :root {
       --paper:        #F7F4EC;
@@ -849,6 +883,7 @@ INDEX_HTML = r"""
       --graphite:     #4A4744;
       --muted:        #857F76;
       --brand:        #1C3E36;
+      --brand-hover:  #142B26;
       --brand-soft:   #E8EEE9;
       --approved:     #2F6B47;
       --approved-soft:#E4EEE6;
@@ -856,34 +891,59 @@ INDEX_HTML = r"""
       --review-soft:  #F5E9CE;
       --rejected:     #9A3F2C;
       --rejected-soft:#F0DDD5;
+
+      /* Reusable layered elevation. Kept subtle so cards lift off the
+         warm paper background without looking like Material Design. */
+      --shadow-sm:  0 1px 0 rgba(28, 27, 26, 0.04);
+      --shadow-md:  0 1px 0 rgba(28, 27, 26, 0.04),
+                    0 6px 16px -6px rgba(28, 27, 26, 0.06),
+                    0 12px 32px -12px rgba(28, 27, 26, 0.08);
+      --shadow-lg:  0 1px 0 rgba(28, 27, 26, 0.05),
+                    0 10px 28px -8px rgba(28, 27, 26, 0.10),
+                    0 20px 48px -16px rgba(28, 27, 26, 0.10);
+
+      --sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+      --serif: "Instrument Serif", "Iowan Old Style", "Palatino Linotype",
+               "Palatino", "Book Antiqua", Georgia, serif;
+      --mono:  ui-monospace, "SF Mono", "JetBrains Mono", Menlo,
+               Consolas, "Liberation Mono", monospace;
     }
 
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                   Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: var(--sans);
       background: var(--paper);
       color: var(--ink);
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: "ss01", "cv11";  /* Inter alt digits + humanized 1/l */
     }
-    .serif {
-      font-family: "Iowan Old Style", "Palatino Linotype", "Palatino",
-                   "Book Antiqua", Georgia, serif;
+    .serif { font-family: var(--serif); }
+
+    /* Smooth reveal for the main workflow cards. */
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: none; }
     }
+    .run-card,
+    .progress-card.visible,
+    .results-card.visible { animation: rise 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
     .container {
-      max-width: 780px;
+      max-width: 820px;
       margin: 0 auto;
-      padding: 32px 24px 96px;
+      padding: 40px 24px 96px;
     }
 
     header.brand {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding-bottom: 40px;
+      padding-bottom: 32px;
       border-bottom: 1px solid var(--border);
       margin-bottom: 48px;
     }
@@ -893,12 +953,12 @@ INDEX_HTML = r"""
       background: var(--brand);
       color: var(--paper);
       border-radius: 2px;
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 20px;
       line-height: 1;
     }
     .brand-text .name {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 18px;
       font-weight: 600;
       letter-spacing: -0.01em;
@@ -940,14 +1000,15 @@ INDEX_HTML = r"""
 
     .hero { margin-bottom: 40px; }
     .hero h1 {
-      font-family: "Iowan Old Style", "Palatino Linotype", "Palatino", Georgia, serif;
-      font-size: 36px;
+      font-family: var(--serif);
+      font-size: 44px;
       font-weight: 400;
-      line-height: 1.2;
+      line-height: 1.1;
       letter-spacing: -0.02em;
-      margin: 0 0 12px;
+      margin: 0 0 14px;
       color: var(--ink);
     }
+    @media (max-width: 560px) { .hero h1 { font-size: 34px; } }
     .hero h1 em {
       font-style: italic;
       color: var(--brand);
@@ -955,25 +1016,58 @@ INDEX_HTML = r"""
     }
     .hero p {
       color: var(--graphite);
-      font-size: 15px;
+      font-size: 15.5px;
       margin: 0;
-      max-width: 540px;
+      max-width: 560px;
+      line-height: 1.55;
     }
 
     .run-card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: 8px;
       overflow: hidden;
+      box-shadow: var(--shadow-md);
     }
-    .run-body { padding: 32px; }
+    .run-body { padding: 36px; }
+    @media (max-width: 560px) { .run-body { padding: 24px; } }
+
+    /* Section groupings inside the run form. */
+    .form-section { margin-bottom: 32px; }
+    .form-section:last-of-type { margin-bottom: 0; }
+    .section-eyebrow {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .section-heading {
+      font-family: var(--serif);
+      font-size: 22px;
+      font-weight: 400;
+      color: var(--ink);
+      margin: 0 0 20px;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+    }
+    .section-heading em { font-style: italic; color: var(--brand); }
+
+    .form-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 32px 0;
+      border: none;
+    }
 
     .fieldset {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 24px;
-      margin-bottom: 32px;
+      margin-bottom: 20px;
     }
+    .fieldset:last-child { margin-bottom: 0; }
     @media (max-width: 560px) { .fieldset { grid-template-columns: 1fr; } }
 
     .field { display: flex; flex-direction: column; gap: 8px; }
@@ -984,18 +1078,28 @@ INDEX_HTML = r"""
       letter-spacing: 0.1em;
       font-weight: 600;
     }
+    .field > label .opt {
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
+      color: var(--muted);
+      opacity: 0.75;
+      margin-left: 4px;
+    }
     .field select, .field input[type="number"], .field input[type="text"] {
       appearance: none;
       -webkit-appearance: none;
-      background: var(--paper);
+      background: #FBF8F0;
       border: 1px solid var(--border-strong);
-      border-radius: 2px;
+      border-radius: 4px;
       padding: 12px 14px;
       font-size: 15px;
       color: var(--ink);
       font-family: inherit;
-      transition: border-color 0.15s, background 0.15s;
+      transition: border-color 0.15s ease, background 0.15s ease,
+                  box-shadow 0.15s ease;
     }
+    .field select:hover, .field input:hover { border-color: var(--graphite); }
     .field-hint {
       font-size: 11px;
       color: var(--muted);
@@ -1010,7 +1114,8 @@ INDEX_HTML = r"""
     .field input:focus, .field select:focus {
       outline: none;
       border-color: var(--brand);
-      background: white;
+      background: #fff;
+      box-shadow: 0 0 0 3px var(--brand-soft);
     }
 
     .preset-row {
@@ -1020,27 +1125,37 @@ INDEX_HTML = r"""
     }
     @media (max-width: 640px) { .preset-row { grid-template-columns: 1fr; } }
     .preset {
+      position: relative;
       background: var(--paper);
       border: 1.5px solid var(--border-strong);
-      border-radius: 3px;
-      padding: 16px 14px;
+      border-radius: 6px;
+      padding: 18px 16px;
       text-align: left;
       cursor: pointer;
       font-family: inherit;
       color: var(--ink);
-      transition: all 0.15s;
+      transition: border-color 0.18s ease, background 0.18s ease,
+                  transform 0.18s ease, box-shadow 0.18s ease;
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
-    .preset:hover {
-      border-color: var(--brand);
-      background: var(--brand-soft);
+    .preset:hover:not(.selected) {
+      border-color: var(--graphite);
+      background: #FBF8F0;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px -4px rgba(28, 27, 26, 0.08);
     }
     .preset.selected {
       border-color: var(--brand);
       background: var(--brand-soft);
-      box-shadow: inset 3px 0 0 var(--brand);
+      box-shadow: 0 0 0 3px rgba(28, 62, 54, 0.08),
+                  inset 3px 0 0 var(--brand);
+    }
+    .preset:focus-visible {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px var(--brand-soft);
     }
     .preset-label {
       font-weight: 600;
@@ -1137,56 +1252,93 @@ INDEX_HTML = r"""
     .adv-check input { margin: 0; accent-color: var(--brand); }
 
     .run-footer {
-      background: var(--paper-warm);
+      background: linear-gradient(to bottom, #F1EBD8 0%, var(--paper-warm) 100%);
       border-top: 1px solid var(--border);
-      padding: 20px 32px;
+      padding: 22px 36px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
+      gap: 20px;
+    }
+    @media (max-width: 560px) {
+      .run-footer {
+        padding: 20px 24px;
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .run-footer .btn-run { justify-content: center; }
     }
     .run-footer .footnote {
       font-size: 12px;
       color: var(--muted);
-      max-width: 320px;
-      line-height: 1.4;
+      max-width: 360px;
+      line-height: 1.5;
     }
     .btn-run {
+      position: relative;
       background: var(--brand);
       color: var(--paper);
       border: none;
-      padding: 14px 32px;
-      border-radius: 2px;
+      padding: 14px 28px 14px 32px;
+      border-radius: 4px;
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
       font-family: inherit;
       letter-spacing: 0.01em;
-      transition: background 0.15s;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.15),
+                  0 4px 12px -4px rgba(28, 62, 54, 0.35);
+      transition: background 0.15s ease, transform 0.15s ease,
+                  box-shadow 0.15s ease;
     }
-    .btn-run::after {
-      content: "->";
-      font-family: "Iowan Old Style", Georgia, serif;
-      font-size: 16px;
+    .btn-run .arrow {
+      font-family: var(--serif);
+      font-size: 18px;
       line-height: 1;
+      transition: transform 0.2s ease;
     }
-    .btn-run:hover { background: #0F2E27; }
+    .btn-run:hover:not(:disabled) {
+      background: var(--brand-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.15),
+                  0 8px 20px -4px rgba(28, 62, 54, 0.45);
+    }
+    .btn-run:hover:not(:disabled) .arrow { transform: translateX(3px); }
+    .btn-run:active:not(:disabled) { transform: translateY(0); }
+    .btn-run:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--brand-soft),
+                  0 0 0 5px var(--brand);
+    }
     .btn-run:disabled {
-      background: var(--muted);
       cursor: not-allowed;
+      opacity: 0.7;
     }
+    .btn-run .spinner {
+      display: none;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(247, 244, 236, 0.35);
+      border-top-color: var(--paper);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .btn-run.loading .arrow { display: none; }
+    .btn-run.loading .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     .progress-card {
       display: none;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 32px;
+      border-radius: 8px;
+      padding: 36px;
       margin-top: 20px;
+      box-shadow: var(--shadow-md);
     }
+    @media (max-width: 560px) { .progress-card { padding: 24px; } }
     .progress-card.visible { display: block; }
 
     .stages {
@@ -1198,15 +1350,17 @@ INDEX_HTML = r"""
     @media (max-width: 560px) { .stages { grid-template-columns: 1fr 1fr; } }
 
     .stage {
+      position: relative;
       padding: 14px;
       border: 1px solid var(--border);
-      border-radius: 2px;
+      border-radius: 6px;
       background: var(--paper);
       display: flex;
       flex-direction: column;
       gap: 6px;
-      opacity: 0.5;
-      transition: all 0.3s;
+      opacity: 0.55;
+      transition: opacity 0.3s ease, background 0.3s ease,
+                  border-color 0.3s ease, box-shadow 0.3s ease;
     }
     .stage.done {
       opacity: 1;
@@ -1215,18 +1369,46 @@ INDEX_HTML = r"""
     }
     .stage.active {
       opacity: 1;
-      background: white;
+      background: #fff;
       border-color: var(--brand);
-      box-shadow: 0 0 0 3px var(--brand-soft);
+      box-shadow: 0 0 0 3px var(--brand-soft),
+                  0 8px 20px -10px rgba(28, 62, 54, 0.3);
+    }
+    /* Pulsing dot in the corner of the currently-active stage. */
+    .stage.active::after {
+      content: "";
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--brand);
+      box-shadow: 0 0 0 0 rgba(28, 62, 54, 0.5);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(28, 62, 54, 0.35); }
+      70%  { box-shadow: 0 0 0 8px rgba(28, 62, 54, 0);  }
+      100% { box-shadow: 0 0 0 0 rgba(28, 62, 54, 0);    }
     }
     .stage-num {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 22px;
       color: var(--brand);
       line-height: 1;
+      transition: color 0.2s ease;
     }
-    .stage.done .stage-num { color: var(--approved); }
-    .stage.done .stage-num::after { content: " OK"; font-size: 12px; }
+    .stage.done .stage-num {
+      color: var(--approved);
+      font-size: 0;  /* hide the number, replace with check */
+    }
+    .stage.done .stage-num::after {
+      content: "\2713";
+      font-family: var(--sans);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--approved);
+    }
     .stage-label {
       font-size: 12px;
       font-weight: 600;
@@ -1260,17 +1442,44 @@ INDEX_HTML = r"""
       font-variant-numeric: tabular-nums;
     }
     .progress-bar {
+      position: relative;
       width: 100%;
-      height: 8px;
-      background: var(--border);
-      border-radius: 4px;
+      height: 10px;
+      background: var(--paper-warm);
+      border-radius: 999px;
       overflow: hidden;
+      box-shadow: inset 0 1px 2px rgba(28, 27, 26, 0.06);
     }
     .progress-bar-fill {
       height: 100%;
-      background: var(--brand);
-      transition: width 0.5s ease;
+      background: linear-gradient(90deg, #1C3E36 0%, #2A5A4D 100%);
+      transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
       width: 0%;
+      border-radius: 999px;
+      position: relative;
+      overflow: hidden;
+    }
+    /* Diagonal-stripe shimmer to reinforce that work is happening. */
+    .progress-bar-fill::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.12) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, 0.12) 50%,
+        rgba(255, 255, 255, 0.12) 75%,
+        transparent 75%
+      );
+      background-size: 16px 16px;
+      animation: barber 1.5s linear infinite;
+      opacity: 0.8;
+    }
+    @keyframes barber {
+      from { background-position: 0 0; }
+      to   { background-position: 16px 0; }
     }
     .progress-detail {
       margin-top: 8px;
@@ -1340,16 +1549,25 @@ INDEX_HTML = r"""
     .banner-warn strong { color: #78350F; }
 
     .log-view {
-      background: #14201C;
-      color: #D8CFB8;
-      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-      font-size: 11px;
-      padding: 16px;
-      border-radius: 2px;
+      background: #171E1B;
+      color: #C9C0AB;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      padding: 18px 20px;
+      border-radius: 6px;
       max-height: 220px;
       overflow-y: auto;
       white-space: pre-wrap;
-      line-height: 1.6;
+      line-height: 1.7;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+      scrollbar-width: thin;
+      scrollbar-color: #3A4744 transparent;
+    }
+    .log-view::-webkit-scrollbar { width: 6px; }
+    .log-view::-webkit-scrollbar-track { background: transparent; }
+    .log-view::-webkit-scrollbar-thumb {
+      background: #3A4744;
+      border-radius: 3px;
     }
 
     .results-card {
@@ -1361,12 +1579,14 @@ INDEX_HTML = r"""
     .results-header {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 32px;
+      border-radius: 8px;
+      padding: 36px;
       margin-bottom: 20px;
+      box-shadow: var(--shadow-md);
     }
+    @media (max-width: 560px) { .results-header { padding: 24px; } }
     .results-header h2 {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 28px;
       font-weight: 400;
       margin: 0 0 24px;
@@ -1394,24 +1614,27 @@ INDEX_HTML = r"""
     @media (max-width: 560px) { .stat-row { grid-template-columns: 1fr 1fr; } }
 
     .stat {
-      padding: 16px;
-      border-radius: 2px;
+      padding: 20px 18px;
+      border-radius: 6px;
       border: 1px solid var(--border);
       background: var(--paper);
+      transition: transform 0.2s ease;
     }
+    .stat:hover { transform: translateY(-1px); }
     .stat .num {
-      font-family: "Iowan Old Style", Georgia, serif;
-      font-size: 40px;
+      font-family: var(--serif);
+      font-size: 44px;
       font-weight: 400;
       line-height: 1;
       letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
     }
     .stat .lbl {
       font-size: 11px;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-top: 8px;
+      letter-spacing: 0.1em;
+      margin-top: 10px;
       font-weight: 600;
     }
     .stat.approved { background: var(--approved-soft); border-color: var(--approved); }
@@ -1427,30 +1650,50 @@ INDEX_HTML = r"""
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 20px 24px;
-      background: var(--brand);
+      padding: 22px 28px;
+      background: linear-gradient(135deg, #1C3E36 0%, #142B26 100%);
       color: var(--paper);
-      border-radius: 2px;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px -8px rgba(28, 62, 54, 0.4);
     }
     .download-cta .txt {
       font-size: 13px;
-      opacity: 0.85;
+      opacity: 0.88;
+      line-height: 1.4;
     }
     .download-cta .btn-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
       background: var(--paper);
       color: var(--brand);
-      padding: 12px 24px;
-      border-radius: 2px;
+      padding: 12px 22px 12px 20px;
+      border-radius: 4px;
       font-weight: 600;
       text-decoration: none;
       font-size: 14px;
-      transition: background 0.15s;
       white-space: nowrap;
+      transition: background 0.15s ease, transform 0.15s ease,
+                  box-shadow 0.15s ease;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.08);
     }
-    .download-cta .btn-download:hover { background: white; }
+    .download-cta .btn-download::before {
+      content: "";
+      display: inline-block;
+      width: 15px; height: 15px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%231C3E36' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='7 10 12 15 17 10'/%3E%3Cline x1='12' y1='15' x2='12' y2='3'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: center;
+    }
+    .download-cta .btn-download:hover {
+      background: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.2);
+    }
+    .download-cta .btn-download:active { transform: translateY(0); }
 
     .section-title {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-size: 18px;
       font-weight: 400;
       margin: 32px 0 8px;
@@ -1464,61 +1707,80 @@ INDEX_HTML = r"""
     .approved-card, .reasons-card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 8px 24px;
+      border-radius: 8px;
+      padding: 4px 24px;
+      box-shadow: var(--shadow-sm);
     }
     .approved-item {
       display: grid;
       grid-template-columns: 1fr auto;
-      gap: 16px;
-      padding: 16px 0;
+      gap: 20px;
+      padding: 18px 0;
       border-bottom: 1px solid var(--border);
+      transition: background 0.15s ease;
+      margin: 0 -12px;
+      padding-left: 12px;
+      padding-right: 12px;
+      border-radius: 4px;
     }
+    .approved-item:hover { background: #FBF8F0; }
     .approved-item:last-child { border-bottom: none; }
     .approved-item .info { min-width: 0; }
     .approved-item .title {
-      font-size: 14px;
+      font-size: 14.5px;
       font-weight: 500;
       color: var(--ink);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      line-height: 1.35;
     }
     .approved-item .meta {
-      font-size: 11px;
+      font-size: 11.5px;
       color: var(--muted);
       display: flex;
       gap: 14px;
       flex-wrap: wrap;
+      align-items: center;
     }
     .approved-item .meta a {
       color: var(--brand);
       text-decoration: none;
+      font-weight: 600;
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 6px;
+      background: var(--brand-soft);
+      border-radius: 3px;
+      transition: background 0.12s ease;
     }
-    .approved-item .meta a:hover { text-decoration: underline; }
+    .approved-item .meta a:hover { background: #DCE5DD; }
     .approved-item .profit {
       text-align: right;
-      font-family: "Iowan Old Style", Georgia, serif;
-      font-size: 22px;
+      font-family: var(--serif);
+      font-size: 26px;
       color: var(--approved);
       line-height: 1;
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
     }
     .approved-item .roi {
       font-size: 11px;
       color: var(--muted);
       text-align: right;
-      margin-top: 6px;
+      margin-top: 8px;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
+      font-weight: 600;
     }
 
     .reason-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 14px 0;
+      padding: 15px 0;
       border-bottom: 1px solid var(--border);
       font-size: 13px;
     }
@@ -1527,22 +1789,41 @@ INDEX_HTML = r"""
     .reason-row .count {
       background: var(--rejected-soft);
       color: var(--rejected);
-      padding: 3px 10px;
-      border-radius: 2px;
-      font-family: "SF Mono", monospace;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-family: var(--mono);
       font-size: 12px;
       font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
 
     .start-over {
-      display: block;
-      text-align: center;
-      margin-top: 32px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 32px auto 0;
       color: var(--muted);
       font-size: 13px;
       text-decoration: none;
+      padding: 10px 18px;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      font-weight: 500;
+      transition: color 0.15s ease, border-color 0.15s ease,
+                  background 0.15s ease, transform 0.15s ease;
     }
-    .start-over:hover { color: var(--brand); }
+    .start-over::before { content: "\21BB"; font-size: 14px; }
+    .start-over:hover {
+      color: var(--brand);
+      border-color: var(--brand);
+      background: var(--brand-soft);
+      transform: translateY(-1px);
+    }
+    .start-over-wrap {
+      display: flex;
+      justify-content: center;
+      margin-top: 32px;
+    }
 
     .empty-state {
       text-align: center;
@@ -1550,7 +1831,7 @@ INDEX_HTML = r"""
       color: var(--muted);
     }
     .empty-state h3 {
-      font-family: "Iowan Old Style", Georgia, serif;
+      font-family: var(--serif);
       font-weight: 400;
       color: var(--ink);
       font-size: 20px;
@@ -1566,7 +1847,7 @@ INDEX_HTML = r"""
       color: var(--rejected);
       font-size: 13px;
       white-space: pre-wrap;
-      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-family: var(--mono);
       max-height: 320px;
       overflow-y: auto;
     }
@@ -1604,37 +1885,46 @@ INDEX_HTML = r"""
     <div class="run-card">
       <div class="run-body">
 
-        <div class="fieldset">
-          <div class="field">
-            <label for="retailer">Supplier</label>
-            <select id="retailer" name="retailer">
-              {% for r in retailers %}
-              <option value="{{ r.value }}">{{ r.label }} - {{ r.sub }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="field">
-            <label for="limit">Products to analyze</label>
-            <input type="number" id="limit" name="limit" value="25" min="1" max="500">
-          </div>
-        </div>
+        <div class="form-section">
+          <div class="section-eyebrow">Step 1</div>
+          <h2 class="section-heading">Choose your <em>source</em>.</h2>
 
-        <div class="fieldset">
-          <div class="field">
-            <label for="brands">Focus on brands (optional)</label>
-            <input type="text" id="brands" placeholder='e.g., "Now Foods, Jarrow Formulas"'>
-            <div class="field-hint">Comma-separated. Only products from these brands.</div>
+          <div class="fieldset">
+            <div class="field">
+              <label for="retailer">Supplier</label>
+              <select id="retailer" name="retailer">
+                {% for r in retailers %}
+                <option value="{{ r.value }}">{{ r.label }} - {{ r.sub }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="limit">Products to analyze</label>
+              <input type="number" id="limit" name="limit" value="25" min="1" max="500">
+            </div>
           </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <div class="field-hint" style="padding-top: 8px;">
-              For iHerb, the tool uses the brand listing with iHerb's own In-stock filter, then double-checks each product page.
+
+          <div class="fieldset">
+            <div class="field">
+              <label for="brands">Focus on brands <span class="opt">(optional)</span></label>
+              <input type="text" id="brands" placeholder='e.g., Now Foods, Jarrow Formulas'>
+              <div class="field-hint">Comma-separated. Only products from these brands will be scraped.</div>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <div class="field-hint" style="padding-top: 8px;">
+                For iHerb, the tool uses the brand listing with iHerb's own <em>In-stock</em> filter, then double-checks each product page.
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="field">
-          <label>Approval criteria</label>
+        <hr class="form-divider">
+
+        <div class="form-section">
+          <div class="section-eyebrow">Step 2</div>
+          <h2 class="section-heading">Pick your <em>filters</em>.</h2>
+
           <div class="preset-row">
             {% for key, p in presets.items() %}
             <button class="preset {% if key == 'balanced' %}selected{% endif %}"
@@ -1709,7 +1999,11 @@ INDEX_HTML = r"""
           Out-of-stock supplier products are skipped automatically.
           Analysis takes roughly 20 seconds per product. Each product costs ~7 Keepa tokens.
         </div>
-        <button type="submit" class="btn-run" id="runBtn">Start analysis</button>
+        <button type="submit" class="btn-run" id="runBtn">
+          <span class="label">Start analysis</span>
+          <span class="arrow" aria-hidden="true">&rarr;</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
       </div>
     </div>
   </form>
@@ -1808,7 +2102,9 @@ INDEX_HTML = r"""
       <p>Try loosening your criteria or running a larger batch.</p>
     </div>
 
-    <a href="#" class="start-over" onclick="location.reload(); return false;">Run another analysis</a>
+    <div class="start-over-wrap">
+      <a href="#" class="start-over" onclick="location.reload(); return false;">Run another analysis</a>
+    </div>
   </div>
 
 </div>
@@ -1859,11 +2155,23 @@ function buildConfig() {
   };
 }
 
+function setRunButtonState(state) {
+  const btn = document.getElementById("runBtn");
+  const label = btn.querySelector(".label");
+  btn.classList.remove("loading");
+  btn.disabled = false;
+  if (state === "loading") {
+    btn.disabled = true;
+    btn.classList.add("loading");
+    label.textContent = "Working";
+  } else {
+    label.textContent = "Start analysis";
+  }
+}
+
 document.getElementById("runForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const btn = document.getElementById("runBtn");
-  btn.disabled = true;
-  btn.textContent = "Starting";
+  setRunButtonState("loading");
 
   document.getElementById("resultsCard").classList.remove("visible");
   document.getElementById("progressCard").classList.add("visible");
@@ -1900,8 +2208,7 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
     pollStatus(data.job_id);
   } catch (err) {
     showError(err.message);
-    btn.disabled = false;
-    btn.textContent = "Start analysis";
+    setRunButtonState("idle");
   }
 });
 
@@ -2004,9 +2311,7 @@ function showResults(jobId, summary, status) {
   const results = document.getElementById("resultsCard");
   results.classList.add("visible");
 
-  const btn = document.getElementById("runBtn");
-  btn.disabled = false;
-  btn.textContent = "Start analysis";
+  setRunButtonState("idle");
 
   document.getElementById("errorBox").style.display = "none";
   document.getElementById("downloadCta").style.display = "";
@@ -2114,9 +2419,7 @@ function showError(msg) {
   document.getElementById("reasonsSection").style.display = "none";
   document.getElementById("emptyState").style.display = "none";
 
-  const btn = document.getElementById("runBtn");
-  btn.disabled = false;
-  btn.textContent = "Start analysis";
+  setRunButtonState("idle");
 }
 
 function addStat(container, num, label, cls) {
