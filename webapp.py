@@ -1374,6 +1374,17 @@ INDEX_HTML = r"""
     }
     .results-header h2 em { font-style: italic; color: var(--brand); }
 
+    /* Persistent meta (Keepa tokens, run duration, etc.) shown in the
+       results header after the job finishes. Kept subtle so it doesn't
+       compete with the stat cards below. */
+    .results-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: -12px 0 20px;
+    }
+    .results-meta:empty { display: none; }
+
     .stat-row {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -1761,7 +1772,16 @@ INDEX_HTML = r"""
         <span id="errorMessage"></span>
       </div>
 
+      <div class="banner-warn" id="resultsKeepaExhaustedBanner">
+        <strong>Keepa quota was hit during this run.</strong>
+        Some products couldn't be fully analysed and are marked
+        <em>INCOMPLETE</em> in the spreadsheet. Re-run in a few minutes to
+        finish them once your token bucket refills.
+      </div>
+
       <h2>Analysis <em>complete</em></h2>
+
+      <div class="results-meta" id="resultsMeta"></div>
 
       <div class="stat-row" id="statRow"></div>
 
@@ -1968,7 +1988,7 @@ async function pollStatus(jobId) {
       });
       document.getElementById("progressBarFill").style.width = "100%";
       document.getElementById("progressEta").textContent = "";
-      setTimeout(() => showResults(jobId, data.summary), 400);
+      setTimeout(() => showResults(jobId, data.summary, data), 400);
     } else if (data.status === "error") {
       showError(data.error || "Unknown error");
     } else {
@@ -1979,7 +1999,7 @@ async function pollStatus(jobId) {
   }
 }
 
-function showResults(jobId, summary) {
+function showResults(jobId, summary, status) {
   document.getElementById("progressCard").classList.remove("visible");
   const results = document.getElementById("resultsCard");
   results.classList.add("visible");
@@ -1990,6 +2010,24 @@ function showResults(jobId, summary) {
 
   document.getElementById("errorBox").style.display = "none";
   document.getElementById("downloadCta").style.display = "";
+
+  // Persist Keepa signals into the results header so the user can plan the
+  // next run (progress card is hidden at this point, so the token pill and
+  // exhausted banner over there are no longer visible).
+  const meta = document.getElementById("resultsMeta");
+  meta.innerHTML = "";
+  if (status && status.keepa_tokens_left != null) {
+    const cls = status.keepa_tokens_left < 100 ? "pill warn" : "pill";
+    meta.insertAdjacentHTML("beforeend",
+      '<span class="' + cls + '">Keepa tokens remaining <strong>' +
+      status.keepa_tokens_left + '</strong></span>');
+  }
+  const exhaustedBanner = document.getElementById("resultsKeepaExhaustedBanner");
+  if (status && status.keepa_exhausted) {
+    exhaustedBanner.classList.add("visible");
+  } else {
+    exhaustedBanner.classList.remove("visible");
+  }
 
   const byStatus = summary.by_status || {};
   const approved = byStatus["APPROVED"] || 0;
@@ -2069,6 +2107,8 @@ function showError(msg) {
   document.getElementById("errorMessage").textContent = msg;
   document.getElementById("errorBox").style.display = "";
   document.getElementById("statRow").innerHTML = "";
+  document.getElementById("resultsMeta").innerHTML = "";
+  document.getElementById("resultsKeepaExhaustedBanner").classList.remove("visible");
   document.getElementById("downloadCta").style.display = "none";
   document.getElementById("approvedSection").style.display = "none";
   document.getElementById("reasonsSection").style.display = "none";
