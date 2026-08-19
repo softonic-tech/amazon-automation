@@ -2006,6 +2006,33 @@ INDEX_HTML = r"""
 <script>
 const PRESETS = {{ presets|tojson }};
 
+// Default per-unit shipping cost by supplier. Matched by hostname
+// substring so protocol/subdomain changes don't break it.
+// User can still edit the field after selection.
+const SUPPLIER_SHIPPING = [
+  { match: "iherb.com", fee: 5 },
+  { match: "zoro.com",  fee: 0 },
+];
+
+function defaultShippingFor(url) {
+  const u = (url || "").toLowerCase();
+  for (const s of SUPPLIER_SHIPPING) {
+    if (u.includes(s.match)) return s.fee;
+  }
+  return 0;
+}
+
+function applySupplierShippingDefault() {
+  const retailer = document.getElementById("retailer");
+  const field = document.getElementById("extra_cost");
+  if (!retailer || !field) return;
+  field.value = defaultShippingFor(retailer.value);
+}
+
+document.getElementById("retailer").addEventListener(
+  "change", applySupplierShippingDefault);
+applySupplierShippingDefault();  // seed on initial page load
+
 document.querySelectorAll(".preset").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".preset").forEach(b => b.classList.remove("selected"));
