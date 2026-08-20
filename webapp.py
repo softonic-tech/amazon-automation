@@ -198,6 +198,10 @@ def _make_job(mode: str) -> str:
             "catalog_size": None,        # actual URLs the catalog returned
             "catalog_notice": None,      # human-friendly shortfall explanation
             "brand_not_found": None,     # brand name if iHerb had no listing page
+            # Cross-run dedup — how many URLs the pipeline skipped because
+            # they were already in the history DB. Surfaced as a UI pill.
+            "dedup_skipped": None,
+            "dedup_all_seen": False,     # all discovered URLs already seen
         }
     return job_id
 
@@ -210,6 +214,14 @@ def _make_job(mode: str) -> str:
 # to avoid false positives on nested "[INFO]"-style prefixes.
 _RE_STEP = re.compile(r"(?:^|\s)\[(\d+)/(\d+)\]\s+(.+?)(?:\s*$)")
 _RE_URLS_YIELDED = re.compile(r"Sitemap yielded (\d+) URL", re.IGNORECASE)
+# Cross-run dedup log: "Dedup: 87 URL(s) already in history — skipping."
+_RE_DEDUP_SKIPPED = re.compile(
+    r"Dedup:\s*(\d+)\s*URL\(s\)\s+already in history", re.IGNORECASE,
+)
+# Every-URL-seen edge case: "All 87 discovered URL(s) are already in history"
+_RE_DEDUP_ALL_SEEN = re.compile(
+    r"All\s+(\d+)\s+discovered URL\(s\) are already in history", re.IGNORECASE,
+)
 _RE_URLS_KEPT = re.compile(r"(\d+) remain(?:ing)?(?:\s+for scraping)?",
                            re.IGNORECASE)
 _RE_TOKENS = re.compile(r"Keepa tokens remaining:\s*(\d+)", re.IGNORECASE)
@@ -350,6 +362,21 @@ def _append_log(job_id: str, line: str) -> None:
                 slug = url.rstrip("/").split("/")[-2 if url.endswith("/") else -1]
                 job["current_activity"] = f"Fetching {slug[:60]}"
 
+        # --- Cross-run dedup counters ---
+        m = _RE_DEDUP_SKIPPED.search(line)
+        if m:
+            try:
+                job["dedup_skipped"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+        m = _RE_DEDUP_ALL_SEEN.search(line)
+        if m:
+            job["dedup_all_seen"] = True
+            try:
+                job["dedup_skipped"] = int(m.group(1))
+            except (ValueError, IndexError):
+                pass
+
         # --- Catalog-shortfall detection ---
         # These branches populate `catalog_size` and `catalog_notice` so the UI
         # can render an amber "you asked for N, catalog only has M" banner.
@@ -385,6 +412,20 @@ def _refresh_catalog_notice(job: dict) -> None:
     brands = job.get("requested_brands")
     source = job.get("requested_source") or "the supplier"
     brand_missing = job.get("brand_not_found")
+
+    # Dedup edge case: every discovered URL was already in history. Show
+    # it prominently so the user knows why the Excel came back empty and
+    # what button to click to re-analyze anyway.
+    if job.get("dedup_all_seen"):
+        skipped = job.get("dedup_skipped") or "all"
+        job["catalog_notice"] = (
+            f"Every one of the {skipped} product(s) discovered on {source} "
+            f"has already been analyzed on a previous run — nothing new to "
+            f"process. To re-analyze them (uses Keepa tokens), tick "
+            f"'Re-analyze products from previous runs' on the run form, "
+            f"or use 'Reset history' to wipe the record entirely."
+        )
+        return
 
     if brand_missing:
         job["catalog_notice"] = (
@@ -590,6 +631,14 @@ def _job_scrape_and_analyze(job_id: str, params: dict) -> None:
             args.extend(["--min-supplier-price", str(params["min_supplier_price"])])
         if params.get("brands"):
             args.extend(["--brands", params["brands"]])
+        # Cross-run dedup — passes the toggle from the UI's "Include
+        # already-seen products" checkbox. Default (unchecked) keeps
+        # skip-seen behavior so tokens aren't wasted re-analyzing prior
+        # products. run_id lets the history DB trace which run first
+        # recorded each URL.
+        if params.get("include_history"):
+            args.append("--include-history")
+        args.extend(["--run-id", job_id])
 
         _run_scraper_subprocess(job_id, args)
         if JOBS[job_id]["status"] == "error":
@@ -693,6 +742,8 @@ def api_status(job_id: str):
             "requested_brands": job.get("requested_brands"),
             "catalog_size": job.get("catalog_size"),
             "catalog_notice": job.get("catalog_notice"),
+            "dedup_skipped": job.get("dedup_skipped"),
+            "dedup_all_seen": job.get("dedup_all_seen", False),
         })
 
 
@@ -708,6 +759,43 @@ def api_download(job_id: str):
         as_attachment=True,
         download_name=f"sourcing_{job_id}.xlsx",
     )
+
+
+# ---------------------------------------------------------------- #
+# Run-history endpoints                                            #
+# ---------------------------------------------------------------- #
+# These power the UI's "already-seen" dedup toggle and the "Reset
+# history" button in advanced settings. History lives in a SQLite
+# file; see history.py for schema and rationale.
+
+def _history_or_none():
+    """Return a RunHistory instance, or None if the DB isn't usable."""
+    try:
+        from history import RunHistory
+        return RunHistory()
+    except Exception as e:  # noqa: BLE001
+        log.warning("History DB unavailable: %s", e)
+        return None
+
+
+@app.route("/api/history/stats")
+@require_login
+def api_history_stats():
+    hist = _history_or_none()
+    if hist is None:
+        return jsonify({"available": False, "total": 0}), 200
+    s = hist.stats()
+    return jsonify({"available": True, **s})
+
+
+@app.route("/api/history/reset", methods=["POST"])
+@require_login
+def api_history_reset():
+    hist = _history_or_none()
+    if hist is None:
+        return jsonify({"ok": False, "error": "History DB unavailable"}), 500
+    removed = hist.reset()
+    return jsonify({"ok": True, "removed": removed})
 
 
 # ---------------------------------------------------------------- #
@@ -1213,6 +1301,62 @@ INDEX_HTML = r"""
       background: rgba(7, 11, 20, 0.8);
       box-shadow: 0 0 0 3px var(--brand-soft);
     }
+
+    /* Dedup row: checkbox + history panel side-by-side */
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: rgba(7, 11, 20, 0.5);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--ink);
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .checkbox-label:hover { border-color: rgba(232, 197, 71, 0.4); }
+    .checkbox-label input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--brand);
+      cursor: pointer;
+    }
+    .history-panel { display: flex; flex-direction: column; gap: 6px; }
+    .history-stats {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: rgba(7, 11, 20, 0.5);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+    }
+    .history-stats .pill {
+      flex: 1;
+      background: rgba(232, 197, 71, 0.08);
+      border-color: rgba(232, 197, 71, 0.28);
+      color: var(--brand);
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      color: var(--ink);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    .btn-ghost:hover {
+      border-color: #F87171;
+      color: #FCA5A5;
+      background: rgba(248, 113, 113, 0.06);
+    }
+    .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .preset-row {
       display: grid;
@@ -1946,6 +2090,32 @@ INDEX_HTML = r"""
               </div>
             </div>
           </div>
+
+          <div class="fieldset dedup-row">
+            <div class="field dedup-field">
+              <label class="checkbox-label">
+                <input type="checkbox" id="include_history">
+                <span>Re-analyze products from previous runs</span>
+              </label>
+              <div class="field-hint">
+                By default, products already downloaded on earlier runs are
+                skipped so Keepa tokens (~7 per product) aren't wasted
+                re-analyzing them.
+              </div>
+            </div>
+            <div class="field history-panel">
+              <label>Run history</label>
+              <div class="history-stats" id="historyStats">
+                <span class="pill" id="historyPill">Loading…</span>
+                <button type="button" class="btn-ghost btn-reset-history"
+                        id="resetHistoryBtn">Reset history</button>
+              </div>
+              <div class="field-hint">
+                Wipe the record of previously-analyzed products so the next
+                run treats everything as new.
+              </div>
+            </div>
+          </div>
         </div>
 
         <hr class="form-divider">
@@ -2180,6 +2350,60 @@ document.getElementById("retailer").addEventListener(
   "change", applySupplierShippingDefault);
 applySupplierShippingDefault();  // seed on initial page load
 
+// -------- Run-history panel --------
+// Loads current dedup DB stats on page load and wires the Reset button.
+// Also called after every successful run to reflect newly-recorded products.
+async function refreshHistoryStats() {
+  const pill = document.getElementById("historyPill");
+  try {
+    const r = await fetch("/api/history/stats");
+    const s = await r.json();
+    if (!s.available || !s.total) {
+      pill.textContent = "No products recorded yet";
+    } else {
+      const oldest = s.oldest_ts
+        ? new Date(s.oldest_ts * 1000).toLocaleDateString()
+        : "";
+      pill.innerHTML = "<strong>" + s.total.toLocaleString() +
+        "</strong> product" + (s.total === 1 ? "" : "s") +
+        " in history" + (oldest ? " since " + oldest : "");
+    }
+  } catch (err) {
+    pill.textContent = "History unavailable";
+  }
+}
+
+document.getElementById("resetHistoryBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("resetHistoryBtn");
+  const original = btn.textContent;
+  // Confirm before wiping — this affects future dedup behavior for
+  // every subsequent run until new products are re-recorded.
+  if (!confirm("Wipe the run history? Future runs will re-analyze every " +
+               "product from scratch (uses Keepa tokens).")) {
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "Resetting…";
+  try {
+    const r = await fetch("/api/history/reset", { method: "POST" });
+    const j = await r.json();
+    if (j.ok) {
+      btn.textContent = "Removed " + j.removed.toLocaleString();
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+      refreshHistoryStats();
+    } else {
+      btn.textContent = "Failed";
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+    }
+  } catch (err) {
+    btn.textContent = "Error";
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+  }
+});
+
+refreshHistoryStats();
+
+
 document.querySelectorAll(".preset").forEach(btn => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".preset").forEach(b => b.classList.remove("selected"));
@@ -2263,6 +2487,7 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
     brands: document.getElementById("brands").value.trim(),
     random: true,
     no_robots: true,
+    include_history: document.getElementById("include_history").checked,
     config: config,
   };
 
@@ -2304,6 +2529,15 @@ function renderProgressPills(data) {
   if (data.urls_discovered != null) {
     pills.push('<span class="pill">Discovered <strong>' +
       data.urls_discovered + '</strong> URLs</span>');
+  }
+  if (data.dedup_skipped != null && data.dedup_skipped > 0) {
+    // Rough token-savings estimate matches the log message from scraper.py.
+    // Displayed as a pill so the client can immediately see the ROI of the
+    // dedup feature ("we saved you 7 * N tokens on this run").
+    const saved = data.dedup_skipped * 7;
+    pills.push('<span class="pill">Dedup skipped <strong>' +
+      data.dedup_skipped + '</strong> already-seen — saved ~<strong>' +
+      saved + '</strong> Keepa tokens</span>');
   }
   if (data.keepa_tokens_left != null) {
     const cls = data.keepa_tokens_left < 100 ? "pill warn" : "pill";
@@ -2377,6 +2611,9 @@ async function pollStatus(jobId) {
       });
       document.getElementById("progressBarFill").style.width = "100%";
       document.getElementById("progressEta").textContent = "";
+      // Refresh the header history pill so the user sees the new total
+      // (this run just added N products to the DB).
+      refreshHistoryStats();
       setTimeout(() => showResults(jobId, data.summary, data), 400);
     } else if (data.status === "error") {
       showError(data.error || "Unknown error");

@@ -56,6 +56,60 @@ _OUT_OF_STOCK_TOKENS = frozenset({
 })
 
 
+# ---------- Pack-size detection ------------------------------------------ #
+#
+# Amazon frequently lists the same physical product both as single units
+# and as multi-packs (Pack of 6, 12-Pack, Case of 24 …). When the tool
+# compares a supplier's SINGLE-unit price against Amazon's MULTI-pack
+# Buy Box price it hallucinates giant profits — the classic "$8 → $60"
+# false positive that ruins client trust. Detecting the pack count on
+# both sides lets _compute_profitability scale supplier cost accordingly.
+#
+# Only high-confidence markers are matched. "Count" / "ct" / "bottles"
+# are intentionally excluded because they double as single-container
+# serving sizes (e.g. "Prenatal Multivitamin, 60 Count" = one bottle of
+# 60 pills, not a pack of 60 bottles). False negatives (undetected
+# multipacks staying at multiplier=1) are safer than false positives
+# (single units suddenly scaled up and hiding real approved deals).
+_PACK_PATTERNS = [
+    re.compile(r"\bpack\s+of\s+(\d+)\b", re.I),
+    re.compile(r"\b(\d+)\s*[-\s]\s*pack\b", re.I),
+    re.compile(r"\b(\d+)\s*pk\b", re.I),
+    re.compile(r"\bset\s+of\s+(\d+)\b", re.I),
+    re.compile(r"\bcase\s+of\s+(\d+)\b", re.I),
+    re.compile(r"\bbundle\s+of\s+(\d+)\b", re.I),
+    re.compile(r"\bbox\s+of\s+(\d+)\b", re.I),
+]
+
+# Cap on realistic multipack sizes. Anything above this is almost
+# certainly a pill / serving count masquerading as a pack marker and
+# should be ignored to avoid catastrophic cost inflation.
+_MAX_PACK_SIZE = 96
+
+
+def _detect_pack_size(title: str | None) -> int:
+    """
+    Return the multipack count declared in a product title, or 1 when the
+    title looks like a single unit. Only matches unambiguous markers
+    ("Pack of N", "N-Pack", "Set of N", "Case of N", "Bundle of N",
+    "Box of N", "N pk"). See comment on _PACK_PATTERNS for why "count"
+    and "bottles" are excluded.
+    """
+    if not title:
+        return 1
+    for pat in _PACK_PATTERNS:
+        m = pat.search(title)
+        if not m:
+            continue
+        try:
+            n = int(m.group(1))
+        except (ValueError, IndexError):
+            continue
+        if 2 <= n <= _MAX_PACK_SIZE:
+            return n
+    return 1
+
+
 def is_out_of_stock(availability: str | None) -> bool:
     """True only when availability is known to be out of stock.
 
@@ -160,12 +214,25 @@ class SourcingRow:
     supplier_original_price: float | None = None  # raw scraped price
     supplier_currency: str = "USD"            # what currency the original was in
     supplier_to_usd_rate: float = 1.0
+    # Detected pack count on the supplier listing (default 1 = single unit).
+    # Used together with `pack_size` (Amazon-side) to compute the correct
+    # supplier-cost basis for the Buy Box price — see _compute_profitability.
+    supplier_pack_size: int = 1
     # --- Amazon data ---
     amazon_asin: str | None = None
     amazon_sell_price: float | None = None
+    # Detected pack count on the Amazon listing (e.g. 12 for "Pack of 12").
+    # When this exceeds supplier_pack_size the tool multiplies supplier cost
+    # so profit reflects the number of units actually needed to fulfil one
+    # Amazon order, not a single unit against a multi-pack sell price.
+    pack_size: int = 1
     fee_pct: float = 0.15
     fee_dollars: float | None = None
     extra_cost: float = 0.0
+    # Supplier cost scaled up by (pack_size / supplier_pack_size). Shown in
+    # the Excel so users can audit why a given profit number looks the way
+    # it does. None when the row was never priced (no Amazon match).
+    effective_supplier_cost: float | None = None
     profit_dollars: float | None = None
     margin_pct: float | None = None
     roi_pct: float | None = None
@@ -231,6 +298,7 @@ def build_sourcing_rows_from_supplier(
             supplier_original_price=original_price,
             supplier_currency=cfg.supplier_currency,
             supplier_to_usd_rate=rate,
+            supplier_pack_size=_detect_pack_size(p.get("title")),
             zoro_url=p.get("url"),
             availability=p.get("availability"),
             fee_pct=cfg.fee_pct,
@@ -247,6 +315,7 @@ def _apply_keepa_match(row: SourcingRow, match) -> None:
     row.amazon_url = f"https://www.amazon.com/dp/{match.asin}"
     row.amazon_sell_price = match.buy_box_price or match.new_price
     row.buy_box_price = match.buy_box_price
+    row.pack_size = _detect_pack_size(match.title)
     row.avg_price_90d = match.avg_price_90d
     row.fbm_sellers = match.fbm_seller_count_live
     row.fba_sellers = match.fba_seller_count_live
@@ -276,6 +345,7 @@ def _clone_for_variation(source: SourcingRow) -> SourcingRow:
         "zoro_sku", "zoro_title", "brand", "model", "upc",
         "zoro_cost", "supplier_original_price",
         "supplier_currency", "supplier_to_usd_rate",
+        "supplier_pack_size",
         "fee_pct", "extra_cost",
         "zoro_url", "availability", "search_query",
     )
@@ -626,14 +696,50 @@ def _compute_profitability(row: SourcingRow) -> None:
     if row.amazon_sell_price is None or row.zoro_cost is None:
         return
     sell = row.amazon_sell_price
-    cost = row.zoro_cost
+
+    # Scale supplier cost + shipping when Amazon is selling a bigger pack
+    # than the supplier lists. Example: supplier sells 1 unit for $8, Amazon
+    # sells a Pack of 6 for $40 → the seller must buy 6 supplier units
+    # ($48) to fulfil one Amazon order, so real profit is $40 - fee - $48
+    # (not the fictitious $32 the old math produced).
+    #
+    # We only ever scale UP (multiplier >= 1). If the supplier pack is
+    # larger than Amazon's, listing quantity is a per-unit sale decision
+    # outside this row's scope — leave the cost at face value.
+    amz_pack = max(1, int(row.pack_size or 1))
+    sup_pack = max(1, int(row.supplier_pack_size or 1))
+    if amz_pack > sup_pack:
+        # ceil() would be safer for non-integer ratios (e.g. Amazon 10-pack
+        # vs supplier 3-pack needs 4 units purchased), but pack markers on
+        # both sides are always small integers, so integer ceil is fine.
+        multiplier = (amz_pack + sup_pack - 1) // sup_pack
+    else:
+        multiplier = 1
+
+    per_unit_cost = row.zoro_cost
+    per_unit_extra = row.extra_cost
+    effective_cost = round(per_unit_cost * multiplier, 2)
+    effective_extra = round(per_unit_extra * multiplier, 2)
+
     fee = round(sell * row.fee_pct, 2)
-    profit = round(sell - fee - row.extra_cost - cost, 2)
+    profit = round(sell - fee - effective_extra - effective_cost, 2)
 
     row.fee_dollars = fee
+    row.effective_supplier_cost = effective_cost
     row.profit_dollars = profit
     row.margin_pct = round(profit / sell, 6) if sell > 0 else None
-    row.roi_pct = round(profit / cost, 6) if cost > 0 else None
+    row.roi_pct = (
+        round(profit / effective_cost, 6) if effective_cost > 0 else None
+    )
+
+    if multiplier > 1:
+        log.info(
+            "Pack-size adjustment for ASIN %s: Amazon pack=%d, supplier "
+            "pack=%d → cost basis $%s × %d = $%s (was $%s per unit)",
+            row.amazon_asin, amz_pack, sup_pack,
+            f"{per_unit_cost:.2f}", multiplier,
+            f"{effective_cost:.2f}", f"{per_unit_cost:.2f}",
+        )
 
 
 def _apply_rules(row: SourcingRow, cfg: SourcingConfig) -> None:
@@ -733,8 +839,10 @@ DEMO_COLUMNS = [
     ("supplier_currency",       "Original Currency"),
     ("supplier_to_usd_rate",    "FX Rate (per USD)"),
     ("zoro_cost",               "Supplier Cost (USD)"),
+    ("supplier_pack_size",      "Supplier Pack"),
     ("amazon_asin",             "Amazon ASIN"),
     ("amazon_title",            "Amazon Title"),
+    ("pack_size",               "Amazon Pack"),
     ("amazon_sell_price",       "Amazon Sell Price"),
     ("buy_box_price",           "Buy Box Price"),
     ("ships_from",              "Ships From"),
@@ -742,6 +850,7 @@ DEMO_COLUMNS = [
     ("fee_pct",                 "Fee %"),
     ("fee_dollars",             "Fee $"),
     ("extra_cost",              "Ship $ / unit"),
+    ("effective_supplier_cost", "Effective Cost (USD)"),
     ("profit_dollars",          "Profit $"),
     ("margin_pct",              "Margin %"),
     ("roi_pct",                 "ROI %"),
@@ -819,7 +928,8 @@ def save_sourcing_xlsx(rows: list[SourcingRow], path: Path) -> None:
             # Format numbers
             if attr in ("zoro_cost", "amazon_sell_price", "buy_box_price",
                         "avg_price_90d", "fee_dollars",
-                        "extra_cost", "profit_dollars"):
+                        "extra_cost", "effective_supplier_cost",
+                        "profit_dollars"):
                 cell.number_format = '"$"#,##0.00'
             elif attr == "supplier_original_price":
                 cell.number_format = '#,##0.00'
@@ -839,12 +949,14 @@ def save_sourcing_xlsx(rows: list[SourcingRow], path: Path) -> None:
         "Supplier Stock": 16, "Brand": 16,
         "Model": 14, "UPC": 14,
         "Supplier Cost (Original)": 14, "Original Currency": 10, "FX Rate (per USD)": 12,
-        "Supplier Cost (USD)": 14,
+        "Supplier Cost (USD)": 14, "Supplier Pack": 12,
         "Amazon ASIN": 13,
-        "Amazon Title": 40, "Amazon Sell Price": 13, "Buy Box Price": 12,
+        "Amazon Title": 40, "Amazon Pack": 12,
+        "Amazon Sell Price": 13, "Buy Box Price": 12,
         "Ships From": 22,
         "Avg Price 90d": 12, "Fee %": 8, "Fee $": 10,
-        "Ship $ / unit": 12, "Profit $": 10, "Margin %": 10, "ROI %": 10,
+        "Ship $ / unit": 12, "Effective Cost (USD)": 16,
+        "Profit $": 10, "Margin %": 10, "ROI %": 10,
         "FBM Sellers (live)": 14, "FBA Sellers (live)": 14,
         "Total Sellers (live)": 16, "Historical Sellers": 15,
         "Amazon on Listing": 15, "Rating": 8, "Reviews": 10,

@@ -937,6 +937,20 @@ Examples:
                       help="Include out-of-stock supplier products (default: skip "
                            "them during hunting and reject them at approval).")
 
+    # Cross-run deduplication — protects Keepa tokens by skipping products
+    # already analyzed on earlier runs. See history.py for storage details.
+    src2.add_argument("--skip-seen", action="store_true", default=True,
+                      help="Skip URLs already in the run-history DB (default: on). "
+                           "Uses the SQLite file at $HISTORY_DB_PATH or "
+                           "./data/history.db.")
+    src2.add_argument("--include-history", action="store_true",
+                      help="Re-analyze products present in run history (opposite "
+                           "of --skip-seen). Useful when prices may have changed.")
+    src2.add_argument("--run-id", type=str, default=None,
+                      help="Opaque run identifier stored with each recorded "
+                           "product; helps trace which run first analyzed a "
+                           "given URL. Auto-generated when omitted.")
+
     # Profitability filters
     src2.add_argument("--min-profit", type=float, default=None,
                       help="Minimum profit $ for approval (default: 0.01)")
@@ -1240,6 +1254,43 @@ def _run(args, client) -> None:
             log.info("Wrote %d URLs to %s", len(urls), out)
             return
 
+        # --- Cross-run deduplication -------------------------------------- #
+        # Applied AFTER all discovery + brand pre-filtering so the log line
+        # 'N already in history' reports against the URLs the pipeline would
+        # otherwise have scraped. Runs regardless of --sourcing so plain
+        # scrapes benefit too.
+        history = None
+        skip_seen = args.skip_seen and not args.include_history
+        if skip_seen and urls:
+            try:
+                from history import RunHistory
+                history = RunHistory()
+                before = len(urls)
+                new_urls, seen_urls = history.filter_new(urls)
+                if seen_urls:
+                    log.info(
+                        "Dedup: %d URL(s) already in history — skipping. "
+                        "%d new URL(s) remain for analysis (saves ~%d "
+                        "Keepa tokens).",
+                        len(seen_urls), len(new_urls), len(seen_urls) * 7,
+                    )
+                urls = new_urls
+                if not urls:
+                    log.warning(
+                        "All %d discovered URL(s) are already in history. "
+                        "Nothing new to analyze. Use --include-history "
+                        "(UI: 'Include already-seen products') to re-run "
+                        "them anyway.",
+                        before,
+                    )
+                    return
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "Dedup skipped — history DB unavailable: %s. "
+                    "Continuing with all URLs.", e,
+                )
+                history = None
+
         # Scrape — with incremental filtering when any filter is active
         scraper = Scraper(client=client)
         if any_filter and args.sitemap:
@@ -1400,6 +1451,34 @@ def _run(args, client) -> None:
         for r in rows:
             by_status[r.status] = by_status.get(r.status, 0) + 1
         log.info("Sourcing done: %s", by_status)
+
+        # Record analyzed products in run history so next run's dedup
+        # filter can skip them. Runs AFTER enrichment (not at discovery)
+        # so a Keepa 429 that kills the run halfway doesn't burn URLs into
+        # history that never made it to the Excel — the client can retry
+        # those URLs on the next run.
+        if history is not None:
+            run_id = args.run_id or f"run-{int(time.time())}"
+            history_rows = []
+            for r in rows:
+                if r.status == "INCOMPLETE":
+                    continue  # don't mark half-analyzed rows as "seen"
+                if not getattr(r, "zoro_url", None):
+                    continue
+                history_rows.append({
+                    "url": r.zoro_url,
+                    "upc": r.upc,
+                    "asin": r.amazon_asin,
+                    "run_id": run_id,
+                })
+            if history_rows:
+                inserted = history.record_many(history_rows)
+                log.info(
+                    "Dedup: recorded %d fully-analyzed product(s) in history "
+                    "(skipped %d incomplete rows). Total history now: %d.",
+                    inserted, len(rows) - len(history_rows),
+                    history.stats()["total"],
+                )
 
         out = Path(args.out)
         # Auto-select format based on extension
