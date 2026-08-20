@@ -967,7 +967,32 @@ def read_urls(url: str | None, file: str | None) -> list[str]:
     return urls
 
 
+def _load_dotenv(path: Path | None = None) -> None:
+    """
+    Load KEY=VALUE pairs from .env into os.environ if the key is not
+    already set. systemd already injects EnvironmentFile for gunicorn;
+    this exists so CLI runs (`python scraper.py ...`) see KEEPA_API_KEY
+    and HTTP_PROXY_URL the same way the web UI does.
+    """
+    env_path = path or Path(__file__).resolve().parent / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError as e:
+        log.warning("Could not read %s: %s", env_path, e)
+
+
 def main() -> None:
+    _load_dotenv()
     ap = argparse.ArgumentParser(
         description="Polite product page scraper.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1162,7 +1187,7 @@ Examples:
         elif "zoro.com" in target_url_l:
             auto_curl = True
             log.info("Zoro detected — auto-selecting --curl "
-                     "(Akamai TLS fingerprint; WARP proxy skipped)")
+                     "(Akamai TLS fingerprint; WARP used for product pages)")
 
     if args.playwright:
         PlaywrightClient = _load_playwright_client()
@@ -1173,12 +1198,12 @@ Examples:
         )
     elif args.curl or auto_curl:
         CurlClient = _load_curl_client()
-        # Zoro's Akamai edge treats Cloudflare WARP exit IPs as bots.
-        # iHerb needs WARP; Zoro needs impersonation WITHOUT the proxy.
+        # iHerb needs WARP. Zoro's HTML sitemap is reachable from the VPS
+        # IP, but category + product pages 403 without WARP — so both
+        # hosts use HTTP_PROXY_URL when it is set.
         client = CurlClient(
             delay=args.delay,
             respect_robots=not args.no_robots,
-            use_env_proxy="zoro.com" not in target_url_l,
         )
     else:
         client = HttpClient(delay=args.delay, respect_robots=not args.no_robots)
