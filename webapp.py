@@ -504,7 +504,55 @@ def _run_scraper_subprocess(job_id: str, args: list[str]) -> None:
     _mark_status(job_id, "summarizing")
 
 
+def _guess_empty_reason(job_id: str) -> str:
+    """
+    Build a human-friendly explanation for why a run produced no Excel.
+    Uses signals _append_log already captured (dedup_all_seen, brand_not_found,
+    catalog_notice) so the message matches whatever the user just saw in the
+    progress card.
+    """
+    with JOBS_LOCK:
+        job = JOBS.get(job_id) or {}
+    if job.get("dedup_all_seen"):
+        return (
+            "Every product discovered was already in your run history, "
+            "so nothing was analyzed. Tick 'Re-analyze products from "
+            "previous runs' or click 'Reset history' to run those "
+            "products again."
+        )
+    if job.get("brand_not_found"):
+        return (
+            f"The supplier had no listing page for brand "
+            f"'{job['brand_not_found']}'. Double-check the spelling."
+        )
+    if job.get("catalog_notice"):
+        return job["catalog_notice"]
+    source = job.get("requested_source") or "the supplier"
+    return (
+        f"No product URLs were discovered on {source}. The site may be "
+        "temporarily blocking the crawler, or the sitemap returned no "
+        "matches for your filters. Re-run in a few minutes and check "
+        "the live log for details."
+    )
+
+
 def _summarize_xlsx(job_id: str, xlsx_path: Path) -> None:
+    # Guard: the scraper subprocess exits WITHOUT writing an Excel when
+    # discovery returned zero URLs (empty sitemap, brand not found, or
+    # every discovered URL already in the dedup history). Without this
+    # short-circuit the openpyxl loader raises FileNotFoundError and the
+    # UI is left spinning forever with no visible error.
+    if not xlsx_path.exists():
+        empty_summary = {
+            "total": 0,
+            "by_status": {},
+            "top_approved": [],
+            "reject_reasons": [],
+            "empty_reason": _guess_empty_reason(job_id),
+        }
+        _mark_status(job_id, "done", output_file=None, summary=empty_summary)
+        return
+
     try:
         from openpyxl import load_workbook
         wb = load_workbook(xlsx_path, data_only=True)
@@ -2309,8 +2357,8 @@ INDEX_HTML = r"""
     </div>
 
     <div id="emptyState" class="empty-state" style="display: none;">
-      <h3>No approved products this run.</h3>
-      <p>Try loosening your criteria or running a larger batch.</p>
+      <h3 id="emptyStateTitle">No approved products this run.</h3>
+      <p id="emptyStateBody">Try loosening your criteria or running a larger batch.</p>
     </div>
 
     <div class="start-over-wrap">
@@ -2712,6 +2760,23 @@ function showResults(jobId, summary, status) {
   } else {
     document.getElementById("approvedSection").style.display = "none";
     document.getElementById("emptyState").style.display = "";
+    // If the scraper produced zero products (missing XLSX), the summarize
+    // path attaches an `empty_reason` string. Show it prominently so the
+    // user knows exactly why they got nothing back (dedup, brand missing,
+    // supplier blocked, etc.) instead of the generic "loosen filters" note.
+    if (summary.empty_reason) {
+      document.getElementById("emptyStateTitle").textContent =
+        "Nothing was analyzed.";
+      document.getElementById("emptyStateBody").textContent =
+        summary.empty_reason;
+      // Hide the download button since there's no file to download.
+      document.getElementById("downloadCta").style.display = "none";
+    } else {
+      document.getElementById("emptyStateTitle").textContent =
+        "No approved products this run.";
+      document.getElementById("emptyStateBody").textContent =
+        "Try loosening your criteria or running a larger batch.";
+    }
   }
 
   const reasonsList = document.getElementById("reasonsList");
