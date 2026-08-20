@@ -206,8 +206,9 @@ class SitemapCrawler:
         if data is None:
             return None
         # .xml.gz is content-level gzip, not transport-level — requests won't
-        # auto-decode it. Also handle servers that serve .gz already decoded.
-        if url.endswith(".gz"):
+        # auto-decode it. Also handle servers that serve gzip without a .gz
+        # URL (Akamai often does this when curl didn't pass --compressed).
+        if url.endswith(".gz") or data[:2] == b"\x1f\x8b":
             try:
                 data = gzip.decompress(data)
             except (gzip.BadGzipFile, OSError):

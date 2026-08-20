@@ -204,6 +204,124 @@ def _collect_iherb_brand_listing_urls(
     return collected
 
 
+_ZORO_PRODUCT_HREF = re.compile(
+    r'href="(?:https?://(?:www\.)?zoro\.com)?(/[^"\s?#]+/i/G\d+/?)"',
+    re.I,
+)
+_ZORO_SITEMAP_HREF = re.compile(
+    r'href="(?:https?://(?:www\.)?zoro\.com)?(/sitemap(?:/[^"\s?#]*)?)"',
+    re.I,
+)
+_ZORO_CAT_HREF = re.compile(
+    r'href="(?:https?://(?:www\.)?zoro\.com)?(/[^"\s?#]+/c/\d+/?)"',
+    re.I,
+)
+
+
+def _zoro_origin(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc or "www.zoro.com"
+    return f"{scheme}://{netloc}"
+
+
+def _extract_zoro_product_paths(html: str) -> list[str]:
+    seen: list[str] = []
+    for m in _ZORO_PRODUCT_HREF.finditer(html or ""):
+        path = m.group(1)
+        if path not in seen:
+            seen.append(path)
+    return seen
+
+
+def _collect_zoro_listing_urls(
+    client,
+    base_url: str,
+    limit: int,
+    sample_random: bool = False,
+    max_pages: int = 40,
+) -> list[str]:
+    """
+    Discover Zoro product URLs from the HTML sitemap.
+
+    Zoro's XML sitemap (robots.txt /sitemap.xml) is blocked by Akamai from
+    datacenter IPs — even curl-impersonate gets a 404 of compressed junk.
+    The human HTML sitemap at /sitemap is reachable with TLS impersonation
+    and links to category pages that contain real /i/G#######/ product URLs.
+    """
+    origin = _zoro_origin(base_url)
+    collected: list[str] = []
+    seen_products: set[str] = set()
+    seen_pages: set[str] = set()
+    category_urls: list[str] = []
+
+    sitemap_queue = [f"{origin}/sitemap"]
+    while sitemap_queue and len(category_urls) < 80:
+        page_url = sitemap_queue.pop(0)
+        if page_url in seen_pages:
+            continue
+        seen_pages.add(page_url)
+        html = client.get(page_url) or ""
+        if not html:
+            continue
+        for path in _extract_zoro_product_paths(html):
+            full = origin + path
+            if full not in seen_products:
+                seen_products.add(full)
+                collected.append(full)
+        for m in _ZORO_CAT_HREF.finditer(html):
+            cat = origin + m.group(1)
+            if cat not in seen_pages and cat not in category_urls:
+                category_urls.append(cat)
+        for m in _ZORO_SITEMAP_HREF.finditer(html):
+            nested = origin + m.group(1)
+            if nested not in seen_pages:
+                sitemap_queue.append(nested)
+        if len(collected) >= limit:
+            break
+
+    log.info(
+        "Zoro HTML sitemap: %d product URL(s) inline, %d category page(s) to walk",
+        len(collected), len(category_urls),
+    )
+
+    if sample_random and category_urls:
+        random.shuffle(category_urls)
+
+    for cat_url in category_urls:
+        if len(collected) >= limit:
+            break
+        for page in range(1, max_pages + 1):
+            if len(collected) >= limit:
+                break
+            url = cat_url if page == 1 else (
+                cat_url + ("&" if "?" in cat_url else "?") + f"page={page}"
+            )
+            if url in seen_pages:
+                break
+            seen_pages.add(url)
+            html = client.get(url) or ""
+            paths = _extract_zoro_product_paths(html)
+            if not paths:
+                break
+            new = 0
+            for path in paths:
+                full = origin + path
+                if full in seen_products:
+                    continue
+                seen_products.add(full)
+                collected.append(full)
+                new += 1
+            if new == 0:
+                break
+
+    if sample_random and len(collected) > limit:
+        random.shuffle(collected)
+    collected = collected[:limit]
+    log.info("Zoro HTML listing collected %d URL(s)", len(collected))
+    return collected
+
+
 def _prefilter_urls_by_brand(urls: list[str], brand_include: list[str],
                               base_host: str) -> tuple[list[str], int]:
     """
@@ -1031,14 +1149,20 @@ Examples:
     if args.playwright and args.curl:
         ap.error("Choose --playwright OR --curl, not both")
 
-    # Auto-select curl for iHerb unless user overrides
+    # Auto-select curl for iHerb and Zoro unless the user overrides.
+    # Both sites fingerprint Python-requests TLS and 403 datacenter IPs.
     target_url = args.url or args.sitemap or args.file
+    target_url_l = (target_url or "").lower()
     auto_curl = False
-    if (not args.playwright and not args.curl and not args.no_auto_curl
-            and target_url and "iherb.com" in target_url.lower()):
-        auto_curl = True
-        log.info("iHerb detected — auto-selecting --curl "
-                 "(disable with --no-auto-curl, override with --playwright)")
+    if not args.playwright and not args.curl and not args.no_auto_curl:
+        if "iherb.com" in target_url_l:
+            auto_curl = True
+            log.info("iHerb detected — auto-selecting --curl "
+                     "(disable with --no-auto-curl, override with --playwright)")
+        elif "zoro.com" in target_url_l:
+            auto_curl = True
+            log.info("Zoro detected — auto-selecting --curl "
+                     "(Akamai TLS fingerprint; WARP proxy skipped)")
 
     if args.playwright:
         PlaywrightClient = _load_playwright_client()
@@ -1049,9 +1173,12 @@ Examples:
         )
     elif args.curl or auto_curl:
         CurlClient = _load_curl_client()
+        # Zoro's Akamai edge treats Cloudflare WARP exit IPs as bots.
+        # iHerb needs WARP; Zoro needs impersonation WITHOUT the proxy.
         client = CurlClient(
             delay=args.delay,
             respect_robots=not args.no_robots,
+            use_env_proxy="zoro.com" not in target_url_l,
         )
     else:
         client = HttpClient(delay=args.delay, respect_robots=not args.no_robots)
@@ -1060,7 +1187,6 @@ Examples:
     # iHerb geo-detects by IP; without these cookies, users in non-US countries
     # get local prices (e.g. PKR from Pakistan). These cookies force US/USD from
     # any IP. Verified working via curl testing.
-    target_url_l = (args.url or args.sitemap or "").lower()
     is_iherb = "iherb.com" in target_url_l
     if args.country:
         cc = args.country.upper()
@@ -1210,6 +1336,23 @@ def _run(args, client) -> None:
                     sample_random=args.random,
                     url_filter=url_filter,
                 )
+
+                # Zoro: XML sitemap is Akamai-blocked from the VPS. Fall back
+                # to the HTML sitemap + category listing pages.
+                if not urls and "zoro.com" in host:
+                    listing_limit = args.limit * (3 if args.random else 2)
+                    log.info(
+                        "Zoro XML sitemap returned 0 URLs — falling back to "
+                        "HTML sitemap at /sitemap (limit %d)",
+                        listing_limit,
+                    )
+                    urls = _collect_zoro_listing_urls(
+                        client,
+                        base_url=args.sitemap,
+                        limit=listing_limit,
+                        sample_random=args.random,
+                    )
+
                 if not urls:
                     log.error("No product URLs found.")
                     log.error("Common causes:")

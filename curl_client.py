@@ -104,6 +104,7 @@ class CurlClient:
         timeout: int = 30,
         respect_robots: bool = True,
         proxy: str | None = None,
+        use_env_proxy: bool = True,
     ) -> None:
         self._curl, self._impersonate_args, self._impersonating = _detect_curl_binary()
 
@@ -120,17 +121,24 @@ class CurlClient:
         self.delay = delay
         self.timeout = timeout
         self.respect_robots = respect_robots
-        # Explicit `proxy=` arg wins over env vars. Common names supported:
-        # HTTP_PROXY_URL (our own), HTTPS_PROXY, HTTP_PROXY.
-        self._proxy = (
-            proxy
-            or os.environ.get("HTTP_PROXY_URL")
-            or os.environ.get("HTTPS_PROXY")
-            or os.environ.get("HTTP_PROXY")
-            or None
-        )
+        # Explicit `proxy=` arg wins. `use_env_proxy=False` skips the env
+        # fallback — needed for Zoro, whose Akamai edge treats Cloudflare
+        # WARP exit IPs as bots even when TLS impersonation succeeds.
+        if proxy:
+            self._proxy = proxy
+        elif use_env_proxy:
+            self._proxy = (
+                os.environ.get("HTTP_PROXY_URL")
+                or os.environ.get("HTTPS_PROXY")
+                or os.environ.get("HTTP_PROXY")
+                or None
+            )
+        else:
+            self._proxy = None
         if self._proxy:
             log.info("curl proxy in use (host redacted)")
+        elif not use_env_proxy:
+            log.info("curl proxy disabled for this host")
 
         self._robots_cache: dict[str, RobotFileParser] = {}
         self._last_request = 0.0
