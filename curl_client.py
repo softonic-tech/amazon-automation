@@ -203,11 +203,13 @@ class CurlClient:
             self._robots_cache[base] = rp
         return rp.can_fetch(DEFAULT_UA, url)
 
-    def _build_command(self, url: str, output_path: Path) -> list[str]:
+    def _build_command(
+        self,
+        url: str,
+        output_path: Path,
+        proxy: str | None = None,
+    ) -> list[str]:
         parsed = urlparse(url)
-        default_referer = f"{parsed.scheme}://{parsed.netloc}/"
-        referer = self._extra_headers.get("Referer", default_referer)
-
         cmd: list[str] = [
             self._curl,
             *self._impersonate_args,   # e.g. ["--impersonate", "chrome131"]
@@ -216,45 +218,79 @@ class CurlClient:
             "--silent",
             "--show-error",
             "-o", str(output_path),
-            "-b", str(self._cookie_jar),   # read cookies
             "-c", str(self._cookie_jar),   # write cookies back
             "--max-time", str(self.timeout),
         ]
+        # Only *read* the jar once it exists. Passing -b on a missing file
+        # can make curl send a blank Cookie header, which Akamai flags.
+        if self._cookie_jar.exists():
+            cmd += ["-b", str(self._cookie_jar)]
 
         # curl-impersonate injects its own UA, Accept, Accept-Language,
         # sec-ch-*, sec-fetch-* headers to match the real browser it mimics.
-        # Overriding them here would defeat the fingerprint match, so we only
-        # add browser-y headers when running plain curl.
+        # Extra -H flags (including Referer) change header order and can
+        # turn a 301 into a 403 on Akamai. Only add them for plain curl.
         if not self._impersonating:
+            default_referer = f"{parsed.scheme}://{parsed.netloc}/"
+            referer = self._extra_headers.get("Referer", default_referer)
             cmd += [
                 "-A", DEFAULT_UA,
                 "-H", ("Accept: text/html,application/xhtml+xml,"
                        "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
                 "-H", "Accept-Language: en-US,en;q=0.9",
                 "-H", "Cache-Control: no-cache",
+                "-H", f"Referer: {referer}",
             ]
 
-        # Referer is per-request and safe to set even when impersonating.
-        cmd += ["-H", f"Referer: {referer}"]
-
         # Route through a proxy (e.g. residential IP pool) when configured.
-        if self._proxy:
-            cmd += ["-x", self._proxy]
+        use_proxy = proxy if proxy is not None else self._proxy
+        if use_proxy:
+            cmd += ["-x", use_proxy]
 
         # Inline cookies from set_cookie() — combines with jar
         if self._extra_cookies:
             cookie_str = "; ".join(f"{k}={v}" for k, v in self._extra_cookies.items())
             cmd += ["-b", cookie_str]
 
-        # Extra user-set headers (Referer already handled)
-        for name, value in self._extra_headers.items():
-            if name.lower() != "referer":
-                cmd += ["-H", f"{name}: {value}"]
+        # Extra user-set headers. Skip when impersonating — they break the
+        # fingerprint (iHerb cookies still go via -b, which is fine).
+        if not self._impersonating:
+            for name, value in self._extra_headers.items():
+                if name.lower() != "referer":
+                    cmd += ["-H", f"{name}: {value}"]
 
         # Write HTTP status code to stdout so we can capture it
         cmd += ["-w", "%{http_code}"]
         cmd.append(url)
         return cmd
+
+    def _run_once(self, url: str, output_path: Path, proxy: str | None) -> tuple[str, bytes | None]:
+        """Run one curl request. Returns (status_code, body_or_none)."""
+        cmd = self._build_command(url, output_path, proxy=proxy)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=self.timeout + 10,
+            check=False,
+        )
+        status_code = result.stdout.decode("ascii", errors="ignore").strip()
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+            log.warning("curl error for %s: %s (status=%s)",
+                        url, stderr[:200], status_code)
+            return status_code, None
+
+        if status_code and not status_code.startswith("2") and \
+           not status_code.startswith("3"):
+            log.error("HTTP %s for %s", status_code, url)
+            return status_code, None
+
+        if not output_path.exists() or output_path.stat().st_size < 10:
+            log.warning("Empty response for %s", url)
+            return status_code, None
+
+        return status_code, output_path.read_bytes()
 
     def _fetch(self, url: str) -> bytes | None:
         if not self._robots_ok(url):
@@ -264,31 +300,26 @@ class CurlClient:
 
         output_path = Path(tempfile.mktemp(dir=self._tmp_dir, suffix=".bin"))
         try:
-            cmd = self._build_command(url, output_path)
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=self.timeout + 10,
-                check=False,
-            )
-            status_code = result.stdout.decode("ascii", errors="ignore").strip()
-
-            if result.returncode != 0:
-                stderr = result.stderr.decode("utf-8", errors="ignore").strip()
-                log.warning("curl error for %s: %s (status=%s)",
-                            url, stderr[:200], status_code)
-                return None
-
-            if status_code and not status_code.startswith("2") and \
-               not status_code.startswith("3"):
-                log.error("HTTP %s for %s", status_code, url)
-                return None
-
-            if not output_path.exists() or output_path.stat().st_size < 10:
-                log.warning("Empty response for %s", url)
-                return None
-
-            return output_path.read_bytes()
+            status, body = self._run_once(url, output_path, proxy=self._proxy)
+            # Direct datacenter IP blocked (typical Akamai 403). Retry once
+            # through WARP / HTTP_PROXY_URL if we weren't already proxied.
+            if body is None and status in {"403", "429", "503"} and not self._proxy:
+                fallback = (
+                    os.environ.get("HTTP_PROXY_URL")
+                    or os.environ.get("HTTPS_PROXY")
+                    or os.environ.get("HTTP_PROXY")
+                    or None
+                )
+                if fallback:
+                    log.warning(
+                        "Retrying %s via proxy after HTTP %s", url, status,
+                    )
+                    try:
+                        output_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    _, body = self._run_once(url, output_path, proxy=fallback)
+            return body
 
         except subprocess.TimeoutExpired:
             log.warning("Timeout fetching %s", url)

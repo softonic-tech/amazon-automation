@@ -1295,7 +1295,25 @@ def _run(args, client) -> None:
                         ", ".join(brand_include),
                     )
 
-            if not urls:
+            if not urls and "zoro.com" in host:
+                # XML sitemap is Akamai-blocked from this VPS (403 on
+                # robots.txt AND /sitemap.xml). Walk the HTML sitemap
+                # instead — curl-impersonate, no extra headers, WARP retry
+                # on 403 (see CurlClient._fetch).
+                listing_limit = args.limit * (3 if args.random else 2)
+                log.info(
+                    "Zoro: skipping XML sitemap (Akamai-blocked). "
+                    "Walking HTML sitemap at /sitemap (limit %d)",
+                    listing_limit,
+                )
+                urls = _collect_zoro_listing_urls(
+                    client,
+                    base_url=args.sitemap,
+                    limit=listing_limit,
+                    sample_random=args.random,
+                )
+
+            if not urls and "zoro.com" not in host:
                 # Narrow brand queries need to crawl many more sitemap files —
                 # niche brands like "Bob's Red Mill" often live past the first
                 # 20 sub-sitemaps. URL pre-filtering makes deeper crawling cheap.
@@ -1337,22 +1355,6 @@ def _run(args, client) -> None:
                     url_filter=url_filter,
                 )
 
-                # Zoro: XML sitemap is Akamai-blocked from the VPS. Fall back
-                # to the HTML sitemap + category listing pages.
-                if not urls and "zoro.com" in host:
-                    listing_limit = args.limit * (3 if args.random else 2)
-                    log.info(
-                        "Zoro XML sitemap returned 0 URLs — falling back to "
-                        "HTML sitemap at /sitemap (limit %d)",
-                        listing_limit,
-                    )
-                    urls = _collect_zoro_listing_urls(
-                        client,
-                        base_url=args.sitemap,
-                        limit=listing_limit,
-                        sample_random=args.random,
-                    )
-
                 if not urls:
                     log.error("No product URLs found.")
                     log.error("Common causes:")
@@ -1387,6 +1389,19 @@ def _run(args, client) -> None:
                                      "%d remain for scraping", dropped, len(urls))
                 else:
                     log.info("Sitemap yielded %d URL(s) to scrape", len(urls))
+
+            if not urls:
+                log.error("No product URLs found.")
+                log.error("Common causes:")
+                log.error("  1. robots.txt disallowed product pages for this UA")
+                log.error("     → retry with --no-robots")
+                log.error("  2. URL pattern doesn't match this site")
+                log.error("     → retry with --pattern '.*'")
+                if "zoro.com" in host:
+                    log.error("  3. Zoro/Akamai is blocking this VPS IP even "
+                              "with curl-impersonate + WARP. A residential "
+                              "proxy would be required for Zoro from here.")
+                return
         else:
             urls = read_urls(args.url, args.file)
 
