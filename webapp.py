@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -465,8 +466,22 @@ def _run_scraper_subprocess(job_id: str, args: list[str]) -> None:
     log.info("Job %s: %s", job_id, " ".join(args))
     _mark_status(job_id, "running")
     try:
+        cmd = [sys.executable, "-u", "scraper.py", *args]
+        # Zoro's Akamai sensor blocks headless Chrome. xvfb-run gives
+        # Chromium a fake display so it runs headed — still $0, no proxy.
+        if any("zoro.com" in str(a) for a in args):
+            xvfb = shutil.which("xvfb-run")
+            if xvfb:
+                cmd = [xvfb, "-a", "-s", "-screen 0 1366x768x24", *cmd]
+                log.info("Job %s: xvfb-run wrapping Zoro Chromium (headed)", job_id)
+            else:
+                log.warning(
+                    "Job %s: xvfb-run not installed — Zoro will use headless "
+                    "Chromium and will likely 403. Install: apt-get install -y xvfb",
+                    job_id,
+                )
         proc = subprocess.Popen(
-            [sys.executable, "-u", "scraper.py", *args],
+            cmd,
             cwd=str(BASE_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

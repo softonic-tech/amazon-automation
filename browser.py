@@ -55,9 +55,10 @@ class PlaywrightClient:
                 "  venv/bin/playwright install chromium"
             ) from e
 
-        self.delay = delay
-        self.timeout = timeout * 1000  # ms
-        self.respect_robots = respect_robots
+        display = os.environ.get("DISPLAY", "").strip()
+        if display and headless:
+            log.info("DISPLAY=%s — headed Chromium (virtual framebuffer)", display)
+            headless = False
         self._extra_headers: dict[str, str] = {}
         self._last_request = 0.0
         self._warmed_hosts: set[str] = set()
@@ -143,13 +144,16 @@ class PlaywrightClient:
         try:
             self._page.goto(origin, wait_until="domcontentloaded", timeout=self.timeout)
             self._page.wait_for_timeout(4000)
-            title = (self._page.title() or "").lower()
-            html = self._page.content()[:800].lower()
-            if "access denied" in html or "denied" in title:
-                log.warning("Warmup still looks blocked (title=%r) — continuing anyway",
-                            self._page.title())
+            title = (self._page.title() or "").strip()
+            html = self._page.content()
+            if self._blocked(html, None) or title.lower() in ("zoro.com", "access denied"):
+                log.warning(
+                    "Warmup looks like an Akamai wall (title=%r, %d bytes) — "
+                    "headed/Xvfb mode may still recover on product pages",
+                    title, len(html),
+                )
             else:
-                log.info("Warmup OK (title=%r)", self._page.title()[:80])
+                log.info("Warmup OK (title=%r, %d bytes)", title[:80], len(html))
         except Exception as e:  # noqa: BLE001
             log.warning("Warmup failed for %s: %s", origin, e)
         self._warmed_hosts.add(host)

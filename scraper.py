@@ -1331,23 +1331,31 @@ def _run(args, client) -> None:
                     )
 
             if not urls and "zoro.com" in host:
-                # XML sitemap is Akamai-blocked from this VPS (403 on
-                # robots.txt AND /sitemap.xml). Walk the HTML sitemap
-                # instead — curl-impersonate, no extra headers, WARP retry
-                # on 403 (see CurlClient._fetch).
+                # XML sitemap is Akamai-blocked. The HTML /sitemap returns
+                # 200 to curl-impersonate but 403 to headless Chromium, so
+                # discovery always uses curl. Product pages then use whatever
+                # `client` is (Playwright headed under Xvfb).
                 listing_limit = args.limit * (3 if args.random else 2)
                 log.info(
-                    "Zoro: skipping XML sitemap (Akamai-blocked). "
-                    "Walking HTML sitemap at /sitemap (limit %d)",
-                    listing_limit,
+                    "Zoro: discovering URLs via curl-impersonate HTML sitemap "
+                    "(limit %d)", listing_limit,
                 )
-                urls = _collect_zoro_listing_urls(
-                    client,
-                    base_url=args.sitemap,
-                    limit=listing_limit,
-                    sample_random=args.random,
-                    walk_categories=client.__class__.__name__ == "PlaywrightClient",
+                CurlClient = _load_curl_client()
+                discover = CurlClient(
+                    delay=args.delay,
+                    respect_robots=not args.no_robots,
+                    use_env_proxy=False,
                 )
+                try:
+                    urls = _collect_zoro_listing_urls(
+                        discover,
+                        base_url=args.sitemap,
+                        limit=listing_limit,
+                        sample_random=args.random,
+                        walk_categories=False,
+                    )
+                finally:
+                    discover.close()
 
             if not urls and "zoro.com" not in host:
                 # Narrow brand queries need to crawl many more sitemap files —
