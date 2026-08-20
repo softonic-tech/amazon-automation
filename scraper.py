@@ -208,13 +208,17 @@ _ZORO_PRODUCT_HREF = re.compile(
     r'(?:https?://(?:www\.)?zoro\.com)?(/[^"\'\s<>?#]*?/i/G\d+)/?',
     re.I,
 )
-_ZORO_SITEMAP_HREF = re.compile(
-    r'href="(?:https?://(?:www\.)?zoro\.com)?(/sitemap(?:/[^"\s?#]*)?)"',
-    re.I,
-)
 _ZORO_CAT_HREF = re.compile(
     r'href="(?:https?://(?:www\.)?zoro\.com)?(/[^"\s?#]+/c/\d+/?)"',
     re.I,
+)
+
+
+_ZORO_IP_BLOCK = (
+    "Zoro/Akamai is IP-blocking this host. Category and product pages "
+    "return a ~1.5KB wall (title 'zoro.com'). curl-impersonate, WARP, "
+    "and headed Chromium cannot bypass it. A residential proxy is "
+    "required for Zoro from this VPS. iHerb still works."
 )
 
 
@@ -259,15 +263,9 @@ def _collect_zoro_listing_urls(
     seen_pages: set[str] = set()
     category_urls: list[str] = []
 
-    sitemap_queue = [f"{origin}/sitemap"]
-    while sitemap_queue and len(category_urls) < 400:
-        page_url = sitemap_queue.pop(0)
-        if page_url in seen_pages:
-            continue
-        seen_pages.add(page_url)
-        html = client.get(page_url) or ""
-        if not html:
-            continue
+    sitemap_url = f"{origin}/sitemap"
+    html = client.get(sitemap_url) or ""
+    if html:
         for path in _extract_zoro_product_paths(html):
             full = origin + path
             if full not in seen_products:
@@ -275,14 +273,9 @@ def _collect_zoro_listing_urls(
                 collected.append(full)
         for m in _ZORO_CAT_HREF.finditer(html):
             cat = origin + m.group(1)
-            if cat not in seen_pages and cat not in category_urls:
+            if cat not in category_urls:
                 category_urls.append(cat)
-        for m in _ZORO_SITEMAP_HREF.finditer(html):
-            nested = origin + m.group(1)
-            if nested not in seen_pages:
-                sitemap_queue.append(nested)
-        if len(collected) >= limit:
-            break
+        seen_pages.add(sitemap_url)
 
     log.info(
         "Zoro HTML sitemap: %d product URL(s) inline, %d category page(s) to walk",
@@ -301,6 +294,8 @@ def _collect_zoro_listing_urls(
     for cat_url in category_urls:
         if len(collected) >= limit:
             break
+        if getattr(walker, "walled", False):
+            break
         for page in range(1, max_pages + 1):
             if len(collected) >= limit:
                 break
@@ -312,6 +307,9 @@ def _collect_zoro_listing_urls(
             seen_pages.add(url)
             log.info("Zoro category %s", url)
             html = walker.get(url) or ""
+            if getattr(walker, "walled", False):
+                log.error(_ZORO_IP_BLOCK)
+                break
             paths = _extract_zoro_product_paths(html)
             if not paths:
                 log.warning("No product links on %s (%d bytes)", url, len(html))
@@ -1198,21 +1196,32 @@ Examples:
             log.info("iHerb detected — auto-selecting --curl "
                      "(disable with --no-auto-curl, override with --playwright)")
         elif "zoro.com" in target_url_l:
-            # curl-impersonate + WARP both 403 Zoro *product* pages (Akamai
-            # JS sensor). A real Chromium can solve that challenge for free.
+            # Product/category pages are Akamai-walled from this VPS IP.
+            # Headed Chromium is still the only free client that *could*
+            # pass a JS challenge; an IP block it cannot.
             auto_playwright = True
-            log.info("Zoro detected — auto-selecting Chromium (Playwright) "
-                     "to pass Akamai JS. pip install playwright && "
-                     "playwright install chromium")
+            log.info("Zoro detected — using headed Chromium (Playwright)")
 
     if args.playwright or auto_playwright:
         PlaywrightClient = _load_playwright_client()
+        proxy_url = (
+            os.environ.get("HTTP_PROXY_URL")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or ""
+        )
+        # WARP (127.0.0.1:40000) is Cloudflare IPs — Akamai 403s those too.
+        # Honor HTTP_PROXY_URL only when it looks like an external/residential proxy.
+        use_res_proxy = bool(proxy_url) and "127.0.0.1" not in proxy_url \
+            and "localhost" not in proxy_url
+        if use_res_proxy:
+            log.info("Zoro: routing Chromium through HTTP_PROXY_URL (residential)")
         client = PlaywrightClient(
             delay=max(args.delay, 2.5),
             timeout=45,
             respect_robots=not args.no_robots,
             headless=not args.show_browser,
-            use_env_proxy=False,
+            use_env_proxy=use_res_proxy,
         )
     elif args.curl or auto_curl:
         CurlClient = _load_curl_client()
@@ -1445,15 +1454,14 @@ def _run(args, client) -> None:
 
             if not urls:
                 log.error("No product URLs found.")
-                log.error("Common causes:")
-                log.error("  1. robots.txt disallowed product pages for this UA")
-                log.error("     → retry with --no-robots")
-                log.error("  2. URL pattern doesn't match this site")
-                log.error("     → retry with --pattern '.*'")
                 if "zoro.com" in host:
-                    log.error("  3. Zoro/Akamai is blocking this VPS IP even "
-                              "with curl-impersonate + WARP. A residential "
-                              "proxy would be required for Zoro from here.")
+                    log.error(_ZORO_IP_BLOCK)
+                else:
+                    log.error("Common causes:")
+                    log.error("  1. robots.txt disallowed product pages for this UA")
+                    log.error("     → retry with --no-robots")
+                    log.error("  2. URL pattern doesn't match this site")
+                    log.error("     → retry with --pattern '.*'")
                 return
         else:
             urls = read_urls(args.url, args.file)

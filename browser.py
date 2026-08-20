@@ -66,6 +66,9 @@ class PlaywrightClient:
         self._extra_headers: dict[str, str] = {}
         self._last_request = 0.0
         self._warmed_hosts: set[str] = set()
+        # Set True once Akamai returns the ~1.5KB title='zoro.com' wall.
+        # Further fetches from this IP will not recover.
+        self.walled = False
 
         # Default OFF for Zoro: WARP (Cloudflare IPs) is also 403'd by
         # Akamai. Direct datacenter + real Chrome JS challenge is the
@@ -151,9 +154,10 @@ class PlaywrightClient:
             title = (self._page.title() or "").strip()
             html = self._page.content()
             if self._blocked(html, None) or title.lower() in ("zoro.com", "access denied"):
-                log.warning(
-                    "Warmup looks like an Akamai wall (title=%r, %d bytes) — "
-                    "headed/Xvfb mode may still recover on product pages",
+                self.walled = True
+                log.error(
+                    "Akamai wall on homepage (title=%r, %d bytes). "
+                    "This IP is blocked — headed Chromium cannot pass it.",
                     title, len(html),
                 )
             else:
@@ -181,8 +185,12 @@ class PlaywrightClient:
         return data.decode("utf-8", errors="ignore")
 
     def get_bytes(self, url: str) -> bytes | None:
+        if self.walled:
+            return None
         self._throttle()
         self._warmup(url)
+        if self.walled:
+            return None
         try:
             if self._extra_headers:
                 self._page.set_extra_http_headers(self._extra_headers)
@@ -190,30 +198,21 @@ class PlaywrightClient:
                 url, wait_until="domcontentloaded", timeout=self.timeout,
             )
             status = resp.status if resp is not None else None
-            # Give Akamai sensor JS a moment, then wait for listing cards.
             self._page.wait_for_timeout(2500)
+            html = self._page.content()
+            if self._blocked(html, None):
+                # Tiny title=zoro.com body is an IP block, not a JS challenge.
+                self.walled = True
+                log.error(
+                    "HTTP %s for %s (playwright, Akamai IP wall, %d bytes)",
+                    status, url, len(html),
+                )
+                return None
             try:
                 self._page.wait_for_selector('a[href*="/i/G"]', timeout=8000)
             except Exception:
                 pass
             html = self._page.content()
-            if self._blocked(html, status):
-                log.info("Playwright got HTTP %s — waiting for challenge on %s",
-                         status, url)
-                self._page.wait_for_timeout(6000)
-                try:
-                    self._page.wait_for_selector('a[href*="/i/G"]', timeout=5000)
-                except Exception:
-                    pass
-                html = self._page.content()
-                # After the wait, ignore the original 403 — the JS challenge
-                # often leaves status=403 even when the real page rendered.
-                if self._blocked(html, None):
-                    log.error(
-                        "HTTP %s for %s (playwright, still blocked, %d bytes)",
-                        status, url, len(html),
-                    )
-                    return None
             if len(html) < 200:
                 log.warning("Empty Playwright body for %s", url)
                 return None
