@@ -240,6 +240,7 @@ def _collect_zoro_listing_urls(
     limit: int,
     sample_random: bool = False,
     max_pages: int = 40,
+    walk_categories: bool = True,
 ) -> list[str]:
     """
     Discover Zoro product URLs from the HTML sitemap.
@@ -287,6 +288,9 @@ def _collect_zoro_listing_urls(
 
     if sample_random and category_urls:
         random.shuffle(category_urls)
+
+    if not walk_categories:
+        category_urls = []
 
     for cat_url in category_urls:
         if len(collected) >= limit:
@@ -1179,22 +1183,28 @@ Examples:
     target_url = args.url or args.sitemap or args.file
     target_url_l = (target_url or "").lower()
     auto_curl = False
+    auto_playwright = False
     if not args.playwright and not args.curl and not args.no_auto_curl:
         if "iherb.com" in target_url_l:
             auto_curl = True
             log.info("iHerb detected — auto-selecting --curl "
                      "(disable with --no-auto-curl, override with --playwright)")
         elif "zoro.com" in target_url_l:
-            auto_curl = True
-            log.info("Zoro detected — auto-selecting --curl "
-                     "(Akamai TLS fingerprint; WARP used for product pages)")
+            # curl-impersonate + WARP both 403 Zoro *product* pages (Akamai
+            # JS sensor). A real Chromium can solve that challenge for free.
+            auto_playwright = True
+            log.info("Zoro detected — auto-selecting Chromium (Playwright) "
+                     "to pass Akamai JS. pip install playwright && "
+                     "playwright install chromium")
 
-    if args.playwright:
+    if args.playwright or auto_playwright:
         PlaywrightClient = _load_playwright_client()
         client = PlaywrightClient(
-            delay=args.delay,
+            delay=max(args.delay, 2.5),
+            timeout=45,
             respect_robots=not args.no_robots,
             headless=not args.show_browser,
+            use_env_proxy=False,
         )
     elif args.curl or auto_curl:
         CurlClient = _load_curl_client()
@@ -1336,6 +1346,7 @@ def _run(args, client) -> None:
                     base_url=args.sitemap,
                     limit=listing_limit,
                     sample_random=args.random,
+                    walk_categories=client.__class__.__name__ == "PlaywrightClient",
                 )
 
             if not urls and "zoro.com" not in host:

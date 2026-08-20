@@ -137,8 +137,9 @@ class CurlClient:
             self._proxy = None
         if self._proxy:
             log.info("curl proxy in use (host redacted)")
-        elif not use_env_proxy:
-            log.info("curl proxy disabled for this host")
+        else:
+            log.info("curl proxy not set (HTTP_PROXY_URL empty) — "
+                     "datacenter IP will be used")
 
         self._robots_cache: dict[str, RobotFileParser] = {}
         self._last_request = 0.0
@@ -283,7 +284,9 @@ class CurlClient:
 
         if status_code and not status_code.startswith("2") and \
            not status_code.startswith("3"):
-            log.error("HTTP %s for %s", status_code, url)
+            log.error("HTTP %s for %s%s",
+                      status_code, url,
+                      " (via proxy)" if proxy else " (direct)")
             return status_code, None
 
         if not output_path.exists() or output_path.stat().st_size < 10:
