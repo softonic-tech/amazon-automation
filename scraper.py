@@ -205,7 +205,7 @@ def _collect_iherb_brand_listing_urls(
 
 
 _ZORO_PRODUCT_HREF = re.compile(
-    r'href="(?:https?://(?:www\.)?zoro\.com)?(/[^"\s?#]+/i/G\d+/?)"',
+    r'(?:https?://(?:www\.)?zoro\.com)?(/[^"\'\s<>?#]*?/i/G\d+)/?',
     re.I,
 )
 _ZORO_SITEMAP_HREF = re.compile(
@@ -229,6 +229,8 @@ def _extract_zoro_product_paths(html: str) -> list[str]:
     seen: list[str] = []
     for m in _ZORO_PRODUCT_HREF.finditer(html or ""):
         path = m.group(1)
+        if not path.endswith("/"):
+            path += "/"
         if path not in seen:
             seen.append(path)
     return seen
@@ -239,17 +241,18 @@ def _collect_zoro_listing_urls(
     base_url: str,
     limit: int,
     sample_random: bool = False,
-    max_pages: int = 40,
+    max_pages: int = 2,
     walk_categories: bool = True,
+    page_client=None,
 ) -> list[str]:
     """
     Discover Zoro product URLs from the HTML sitemap.
 
-    Zoro's XML sitemap (robots.txt /sitemap.xml) is blocked by Akamai from
-    datacenter IPs — even curl-impersonate gets a 404 of compressed junk.
-    The human HTML sitemap at /sitemap is reachable with TLS impersonation
-    and links to category pages that contain real /i/G#######/ product URLs.
+    `client` fetches the sitemap (curl-impersonate works here).
+    `page_client` (optional) fetches category pages — headed Chromium —
+    because Akamai 403s those URLs for curl.
     """
+    walker = page_client or client
     origin = _zoro_origin(base_url)
     collected: list[str] = []
     seen_products: set[str] = set()
@@ -257,7 +260,7 @@ def _collect_zoro_listing_urls(
     category_urls: list[str] = []
 
     sitemap_queue = [f"{origin}/sitemap"]
-    while sitemap_queue and len(category_urls) < 80:
+    while sitemap_queue and len(category_urls) < 400:
         page_url = sitemap_queue.pop(0)
         if page_url in seen_pages:
             continue
@@ -292,6 +295,9 @@ def _collect_zoro_listing_urls(
     if not walk_categories:
         category_urls = []
 
+    # A handful of category pages is enough to fill a small --limit.
+    category_urls = category_urls[:12]
+
     for cat_url in category_urls:
         if len(collected) >= limit:
             break
@@ -304,9 +310,11 @@ def _collect_zoro_listing_urls(
             if url in seen_pages:
                 break
             seen_pages.add(url)
-            html = client.get(url) or ""
+            log.info("Zoro category %s", url)
+            html = walker.get(url) or ""
             paths = _extract_zoro_product_paths(html)
             if not paths:
+                log.warning("No product links on %s (%d bytes)", url, len(html))
                 break
             new = 0
             for path in paths:
@@ -1352,7 +1360,8 @@ def _run(args, client) -> None:
                         base_url=args.sitemap,
                         limit=listing_limit,
                         sample_random=args.random,
-                        walk_categories=False,
+                        walk_categories=True,
+                        page_client=client,
                     )
                 finally:
                     discover.close()
