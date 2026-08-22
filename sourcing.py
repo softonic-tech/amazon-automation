@@ -65,38 +65,61 @@ _OUT_OF_STOCK_TOKENS = frozenset({
 # false positive that ruins client trust. Detecting the pack count on
 # both sides lets _compute_profitability scale supplier cost accordingly.
 #
-# Only high-confidence markers are matched. "Count" / "ct" / "bottles"
-# are intentionally excluded because they double as single-container
-# serving sizes (e.g. "Prenatal Multivitamin, 60 Count" = one bottle of
-# 60 pills, not a pack of 60 bottles). False negatives (undetected
-# multipacks staying at multiplier=1) are safer than false positives
-# (single units suddenly scaled up and hiding real approved deals).
+# Amazon title formats we must catch (real Keepa titles):
+#   "8 Ounce (Pack of 6)", "Kerasal … (2 Pack)", "12-Pack", "12 Pack",
+#   "6pk", "2 x 8 oz", "Twin Pack", "(2 Count)" next to a size.
+# "60 Count" / "240 Softgels" are serving sizes, not multipacks — those
+# stay at 1. False negatives are safer than treating a bottle of pills
+# as a 60-pack.
 _PACK_PATTERNS = [
     re.compile(r"\bpack\s+of\s+(\d+)\b", re.I),
-    re.compile(r"\b(\d+)\s*[-\s]\s*pack\b", re.I),
-    re.compile(r"\b(\d+)\s*pk\b", re.I),
     re.compile(r"\bset\s+of\s+(\d+)\b", re.I),
     re.compile(r"\bcase\s+of\s+(\d+)\b", re.I),
     re.compile(r"\bbundle\s+of\s+(\d+)\b", re.I),
     re.compile(r"\bbox\s+of\s+(\d+)\b", re.I),
+    re.compile(r"\b(\d+)\s*-\s*packs?\b", re.I),
+    re.compile(r"\b(\d+)\s+packs?\b", re.I),
+    re.compile(r"\b(\d+)\s*pk\b", re.I),
+    # 2 x 8 oz / 6x16oz — the first number is the pack count
+    re.compile(
+        r"\b(\d+)\s*[x×]\s*[\d.]+\s*(?:fl\.?\s*)?(?:oz|ounce|lb|pound|g|kg|ml|l)\b",
+        re.I,
+    ),
+    # Amazon variation "2 Count" / "(2 Count)" — only small N (see cap below)
+    re.compile(r"\((\d+)\s*counts?\)", re.I),
+    re.compile(r"\b(\d+)\s*-\s*counts?\b", re.I),
 ]
 
+_NAMED_PACKS = [
+    (re.compile(r"\btwin\s+packs?\b", re.I), 2),
+    (re.compile(r"\btriple\s+packs?\b", re.I), 3),
+]
+
+_SERVING_WORDS = re.compile(
+    r"softgels?|capsules?|tablets?|pills?|gummies|servings?|veggie\s+caps?",
+    re.I,
+)
+
 # Cap on realistic multipack sizes. Anything above this is almost
-# certainly a pill / serving count masquerading as a pack marker and
-# should be ignored to avoid catastrophic cost inflation.
+# certainly a pill / serving count masquerading as a pack marker.
 _MAX_PACK_SIZE = 96
+# "N Count" without "pack" is only trusted for small Amazon variation sizes.
+_MAX_COUNT_AS_PACK = 12
+
+_IHERB_FREE_SHIP_MIN = 25.0
+_IHERB_SHIP_FEE = 5.0
 
 
 def _detect_pack_size(title: str | None) -> int:
     """
     Return the multipack count declared in a product title, or 1 when the
-    title looks like a single unit. Only matches unambiguous markers
-    ("Pack of N", "N-Pack", "Set of N", "Case of N", "Bundle of N",
-    "Box of N", "N pk"). See comment on _PACK_PATTERNS for why "count"
-    and "bottles" are excluded.
+    title looks like a single unit.
     """
     if not title:
         return 1
+    for pat, n in _NAMED_PACKS:
+        if pat.search(title):
+            return n
     for pat in _PACK_PATTERNS:
         m = pat.search(title)
         if not m:
@@ -105,9 +128,57 @@ def _detect_pack_size(title: str | None) -> int:
             n = int(m.group(1))
         except (ValueError, IndexError):
             continue
-        if 2 <= n <= _MAX_PACK_SIZE:
+        is_count = "count" in pat.pattern
+        cap = _MAX_COUNT_AS_PACK if is_count else _MAX_PACK_SIZE
+        if 2 <= n <= cap:
+            return n
+    # Bare "N Count" (no parens) — only 2–12, and not a pill serving.
+    m = re.search(r"\b(\d+)\s+counts?\b", title, re.I)
+    if m:
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            n = 0
+        if 2 <= n <= _MAX_COUNT_AS_PACK and not _SERVING_WORDS.search(title):
             return n
     return 1
+
+
+def _amazon_pack_size(
+    title: str | None,
+    number_of_items: int | None = None,
+) -> int:
+    """Title first; Keepa numberOfItems as fallback for silent multipacks."""
+    from_title = _detect_pack_size(title)
+    if from_title > 1:
+        return from_title
+    if not number_of_items:
+        return 1
+    try:
+        n = int(number_of_items)
+    except (TypeError, ValueError):
+        return 1
+    if not (2 <= n <= 24):
+        return 1
+    # "240 Softgels" with numberOfItems=240 must not become a 240-pack.
+    if title and re.search(
+        rf"\b{n}\s*(?:{_SERVING_WORDS.pattern}|counts?)\b",
+        title,
+        re.I,
+    ):
+        return 1
+    return n
+
+
+def _is_iherb_row(row: "SourcingRow") -> bool:
+    return "iherb.com" in (getattr(row, "zoro_url", None) or "").lower()
+
+
+def _iherb_shipping(order_value: float) -> float:
+    """iHerb: $5 under $25, free at $25+ (one shipment, not per unit)."""
+    if order_value < _IHERB_FREE_SHIP_MIN:
+        return _IHERB_SHIP_FEE
+    return 0.0
 
 
 def is_out_of_stock(availability: str | None) -> bool:
@@ -298,7 +369,7 @@ def build_sourcing_rows_from_supplier(
             supplier_original_price=original_price,
             supplier_currency=cfg.supplier_currency,
             supplier_to_usd_rate=rate,
-            supplier_pack_size=_detect_pack_size(p.get("title")),
+            supplier_pack_size=_amazon_pack_size(p.get("title")),
             zoro_url=p.get("url"),
             availability=p.get("availability"),
             fee_pct=cfg.fee_pct,
@@ -315,7 +386,10 @@ def _apply_keepa_match(row: SourcingRow, match) -> None:
     row.amazon_url = f"https://www.amazon.com/dp/{match.asin}"
     row.amazon_sell_price = match.buy_box_price or match.new_price
     row.buy_box_price = match.buy_box_price
-    row.pack_size = _detect_pack_size(match.title)
+    row.pack_size = _amazon_pack_size(
+        match.title,
+        getattr(match, "number_of_items", None),
+    )
     row.avg_price_90d = match.avg_price_90d
     row.fbm_sellers = match.fbm_seller_count_live
     row.fba_sellers = match.fba_seller_count_live
@@ -651,6 +725,7 @@ def build_sourcing_rows(
             row.reviews = top.review_count
             row.amazon_url = top.url
             row.amazon_title = top.title
+            row.pack_size = _amazon_pack_size(top.title)
 
             # Step 2: enrich from product page (optional)
             if enrich_top_match and top.asin:
@@ -674,6 +749,7 @@ def _merge_details(row: SourcingRow, d: AmazonProductDetails) -> None:
         return  # keep whatever we had from search
     if d.title:
         row.amazon_title = d.title
+        row.pack_size = _amazon_pack_size(d.title)
     if d.price:
         row.amazon_sell_price = _to_float(d.price)
     if d.rating:
@@ -719,7 +795,13 @@ def _compute_profitability(row: SourcingRow) -> None:
     per_unit_cost = row.zoro_cost
     per_unit_extra = row.extra_cost
     effective_cost = round(per_unit_cost * multiplier, 2)
-    effective_extra = round(per_unit_extra * multiplier, 2)
+    if _is_iherb_row(row):
+        # One iHerb shipment for the units needed to fulfil the Amazon pack.
+        # $5 if that order is under $25, free at $25+.
+        effective_extra = _iherb_shipping(effective_cost)
+        row.extra_cost = effective_extra
+    else:
+        effective_extra = round(per_unit_extra * multiplier, 2)
 
     fee = round(sell * row.fee_pct, 2)
     profit = round(sell - fee - effective_extra - effective_cost, 2)

@@ -2148,8 +2148,8 @@ INDEX_HTML = r"""
               <input type="number" id="extra_cost" step="0.01" min="0" value="0"
                      placeholder="e.g., 5">
               <div class="field-hint">
-                Deducted from profit per unit, like the Amazon fee.
-                iHerb typically charges ~$5; Zoro is free.
+                Deducted from profit. iHerb is applied automatically:
+                $5 under $25, free at $25+. Zoro is free.
               </div>
             </div>
           </div>
@@ -2390,7 +2390,7 @@ const PRESETS = {{ presets|tojson }};
 // substring so protocol/subdomain changes don't break it.
 // User can still edit the field after selection.
 const SUPPLIER_SHIPPING = [
-  { match: "iherb.com", fee: 5 },
+  { match: "iherb.com", fee: 0 },
   { match: "zoro.com",  fee: 0 },
 ];
 

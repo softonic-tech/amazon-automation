@@ -105,6 +105,9 @@ class KeepaMatch:
     category_tree: list[str] = field(default_factory=list)
     upc: str | None = None
     ean: str | None = None
+    # Multipack size from Keepa (1 = single). Used when the title omits
+    # "Pack of N" but Amazon still stores numberOfItems = 6, etc.
+    number_of_items: int | None = None
 
     # Pricing (dollars, converted from Keepa cents)
     amazon_price: float | None = None      # None = Amazon not selling
@@ -542,6 +545,14 @@ class KeepaClient:
         eans = p.get("eanList") or []
         m.upc = upcs[0] if upcs else None
         m.ean = eans[0] if eans else None
+        noi = p.get("numberOfItems")
+        if noi is not None:
+            try:
+                n = int(noi)
+                if n >= 1:
+                    m.number_of_items = n
+            except (TypeError, ValueError):
+                pass
 
         # Category
         cat_tree = p.get("categoryTree") or []
