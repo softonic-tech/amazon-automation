@@ -43,6 +43,11 @@ class SitemapCrawler:
         "grainger.com": r"/product/",
         "iherb.com":    r"/pr/[^/?#]+/\d+/?$",
     }
+    try:
+        from retailers import PRODUCT_PATTERNS as _REG
+        DEFAULT_PATTERNS = {**DEFAULT_PATTERNS, **_REG}
+    except ImportError:
+        pass
 
     def __init__(self, client, max_sitemaps: int = 20) -> None:
         """
@@ -93,6 +98,8 @@ class SitemapCrawler:
 
         target_pool = limit * pool_multiplier if sample_random else limit
         sitemap_urls = self._discover_sitemaps(base_url)
+        # Product sitemaps first so a 20-file cap is not wasted on category indexes.
+        sitemap_urls.sort(key=lambda u: 0 if "product" in u.lower() else 1)
         log.info("Discovered %d top-level sitemap(s)", len(sitemap_urls))
 
         collected: list[str] = []

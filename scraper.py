@@ -617,7 +617,41 @@ class ProductParser:
                             "[data-testid='stock-status'], "
                             ".stock-status, #stock-status",
         },
-        # Add other retailers here.
+        "walmart.com": {
+            "title": "h1[itemprop='name'], h1",
+            "price": "[data-testid='price-wrap'] span, "
+                     "[itemprop='price'], span[data-seo-id='hero-price']",
+            "brand": "[itemprop='brand'] [itemprop='name'], [data-testid='product-brand']",
+            "availability": "[itemprop='availability'], "
+                            "[data-testid='add-to-cart-section']",
+        },
+        "samsclub.com": {
+            "title": "h1[itemprop='name'], h1",
+            "price": "[itemprop='price'], [data-testid='product-price']",
+            "brand": "[itemprop='brand']",
+            "availability": "[itemprop='availability']",
+        },
+        "tractorsupply.com": {
+            "title": "h1.prod-title, h1[itemprop='name'], h1",
+            "price": ".prod-price, [itemprop='price'], .price",
+            "brand": "[itemprop='brand'], .prod-brand",
+            "sku": "[itemprop='sku'], .prod-sku",
+            "availability": "[itemprop='availability'], .stock-status",
+        },
+        "farmandfleet.com": {
+            "title": "h1.product-name, h1[itemprop='name'], h1",
+            "price": ".product-price, [itemprop='price'], .price",
+            "brand": "[itemprop='brand'], .product-brand",
+            "sku": "[itemprop='sku'], .product-sku",
+            "availability": "[itemprop='availability'], .availability",
+        },
+        "maxwarehouse.com": {
+            # Shopify — JSON-LD Product is the primary source
+            "title": "h1.product__title, h1.product-title, h1",
+            "price": ".price, [data-product-price], .product__price",
+            "brand": ".product__vendor, [itemprop='brand']",
+            "availability": "[itemprop='availability'], .product__inventory",
+        },
     }
 
     def parse(self, html: str, url: str) -> Product:
@@ -1191,11 +1225,15 @@ Examples:
     auto_curl = False
     auto_playwright = False
     if not args.playwright and not args.curl and not args.no_auto_curl:
-        if "iherb.com" in target_url_l:
+        try:
+            from retailers import uses_curl, uses_playwright
+        except ImportError:
+            uses_curl = lambda u: "iherb.com" in (u or "").lower()  # noqa: E731
+            uses_playwright = lambda u: "zoro.com" in (u or "").lower()  # noqa: E731
+        if uses_curl(target_url or ""):
             auto_curl = True
-            log.info("iHerb detected — auto-selecting --curl "
-                     "(disable with --no-auto-curl, override with --playwright)")
-        elif "zoro.com" in target_url_l:
+            log.info("Auto-selecting --curl for %s", target_url_l)
+        elif uses_playwright(target_url or "") or "zoro.com" in target_url_l:
             # Product/category pages are Akamai-walled from this VPS IP.
             # Headed Chromium is still the only free client that *could*
             # pass a JS challenge; an IP block it cannot.

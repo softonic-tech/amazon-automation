@@ -42,6 +42,7 @@ from flask import (
 )
 
 from sourcing import SourcingConfig
+from retailers import RETAILERS
 
 # ---------------------------------------------------------------- #
 # Setup                                                            #
@@ -60,6 +61,58 @@ WORK_DIR.mkdir(exist_ok=True)
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+
+
+def _job_store():
+    """Lazy JobStore so a missing DB never blocks boot."""
+    store = getattr(_job_store, "_inst", None)
+    if store is False:
+        return None
+    if store is None:
+        try:
+            from persist import JobStore
+            store = JobStore()
+            _job_store._inst = store  # type: ignore[attr-defined]
+            n = store.load_into(JOBS, JOBS_LOCK)
+            if n:
+                log.info("Restored %d recent job(s) from disk", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Job store unavailable: %s", e)
+            _job_store._inst = False  # type: ignore[attr-defined]
+            return None
+    return store
+
+
+def _persist_job(job_id: str, payload: dict | None = None) -> None:
+    store = _job_store()
+    if not store:
+        return
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            return
+        snap = {
+            "id": job["id"],
+            "status": job.get("status"),
+            "mode": job.get("mode"),
+            "error": job.get("error"),
+            "output_file": job.get("output_file"),
+            "summary": job.get("summary"),
+            "created_at": job.get("created_at"),
+            "requested_source": job.get("requested_source"),
+        }
+    try:
+        store.upsert_job(snap, payload=payload)
+    except Exception as e:  # noqa: BLE001
+        log.debug("job persist failed: %s", e)
+
+
+def _any_job_busy() -> bool:
+    with JOBS_LOCK:
+        return any(
+            (j.get("status") or "") in ("queued", "running", "summarizing")
+            for j in JOBS.values()
+        )
 
 
 # ---------------------------------------------------------------- #
@@ -145,18 +198,8 @@ PRESETS = {
     },
 }
 
-RETAILERS = [
-    {
-        "value": "https://www.zoro.com",
-        "label": "Zoro",
-        "sub": "US supplier | prices in USD",
-    },
-    {
-        "value": "https://www.iherb.com",
-        "label": "iHerb",
-        "sub": "supplements | US pricing forced",
-    },
-]
+# Retailer list lives in retailers.py so sitemap + UI stay in sync.
+# (Previous inline RETAILERS dict removed.)
 
 
 # ---------------------------------------------------------------- #
@@ -204,6 +247,7 @@ def _make_job(mode: str) -> str:
             "dedup_skipped": None,
             "dedup_all_seen": False,     # all discovered URLs already seen
         }
+    _persist_job(job_id)
     return job_id
 
 
@@ -460,6 +504,8 @@ def _mark_status(job_id: str, status: str, **extra) -> None:
             job["status"] = status
             for k, v in extra.items():
                 job[k] = v
+    if extra or status in ("queued", "running", "summarizing", "done", "error"):
+        _persist_job(job_id)
 
 
 def _run_scraper_subprocess(job_id: str, args: list[str]) -> None:
@@ -679,6 +725,7 @@ def _job_scrape_and_analyze(job_id: str, params: dict) -> None:
                     job["requested_source"] = host or None
                 except Exception:  # noqa: BLE001
                     job["requested_source"] = None
+        _persist_job(job_id, payload=params)
 
         args = [
             "--sitemap", params["sitemap_url"],
@@ -763,6 +810,70 @@ def index():
     )
 
 
+def _launch_scrape_job(params: dict) -> str:
+    job_id = _make_job("scrape")
+    _persist_job(job_id, payload=params)
+    threading.Thread(
+        target=_job_scrape_and_analyze,
+        args=(job_id, params), daemon=True,
+    ).start()
+    return job_id
+
+
+def _parse_schedule_time(raw: str) -> tuple[int, int] | None:
+    text = (raw or "").strip()
+    if not text or ":" not in text:
+        return None
+    try:
+        hh, mm = text.split(":", 1)
+        hour, minute = int(hh), int(mm.split(":")[0] if ":" in mm else mm)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _maybe_save_schedule(params: dict) -> dict | None:
+    if not params.get("schedule_daily"):
+        return None
+    parsed = _parse_schedule_time(str(params.get("schedule_time") or "06:00"))
+    if parsed is None:
+        parsed = (6, 0)
+    store = _job_store()
+    if not store:
+        log.warning("Cannot save daily schedule — job store unavailable")
+        return None
+    hour, minute = parsed
+    sched = store.add_schedule(params, hour=hour, minute=minute)
+    log.info("Saved daily schedule %s at %02d:%02d", sched.get("id"), hour, minute)
+    return sched
+
+
+def _scheduler_loop() -> None:
+    time.sleep(20)
+    log.info("Daily scheduler thread running (timezone America/Chicago)")
+    while True:
+        try:
+            store = _job_store()
+            if store and not _any_job_busy():
+                due = store.claim_due()
+                for sched in due:
+                    while _any_job_busy():
+                        time.sleep(15)
+                    payload = dict(sched.get("payload") or {})
+                    payload.pop("schedule_daily", None)
+                    job_id = _launch_scrape_job(payload)
+                    store.mark_launched(sched["id"], job_id)
+                    log.info(
+                        "Daily schedule %s launched job %s (%s)",
+                        sched["id"], job_id, sched.get("label"),
+                    )
+        except Exception:  # noqa: BLE001
+            log.exception("Scheduler tick failed")
+        time.sleep(30)
+
+
 @app.route("/api/run", methods=["POST"])
 @require_login
 def api_run():
@@ -771,12 +882,12 @@ def api_run():
     missing = [k for k in required if k not in data]
     if missing:
         return jsonify({"error": f"Missing: {missing}"}), 400
-    job_id = _make_job("scrape")
-    threading.Thread(
-        target=_job_scrape_and_analyze,
-        args=(job_id, data), daemon=True,
-    ).start()
-    return jsonify({"job_id": job_id})
+    sched = _maybe_save_schedule(data)
+    job_id = _launch_scrape_job(data)
+    out = {"job_id": job_id}
+    if sched:
+        out["schedule_id"] = sched.get("id")
+    return jsonify(out)
 
 
 @app.route("/api/status/<job_id>")
@@ -784,30 +895,55 @@ def api_run():
 def api_status(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-        if job is None:
+    if job is None:
+        store = _job_store()
+        row = store.get_job(job_id) if store else None
+        if row is None:
             return jsonify({"error": "unknown job"}), 404
         return jsonify({
-            "status": job["status"],
-            "stage": job["stage"],
-            "log_tail": job["log"][-25:],
-            "log_count": len(job["log"]),
-            "error": job["error"],
-            "summary": job["summary"],
-            "keepa_exhausted": job.get("keepa_exhausted", False),
-            "keepa_tokens_left": job.get("keepa_tokens_left"),
-            "current": job.get("current"),
-            "total": job.get("total"),
-            "current_activity": job.get("current_activity"),
-            "urls_discovered": job.get("urls_discovered"),
-            "urls_after_filter": job.get("urls_after_filter"),
-            "eta_seconds": job.get("eta_seconds"),
-            "requested_limit": job.get("requested_limit"),
-            "requested_brands": job.get("requested_brands"),
-            "catalog_size": job.get("catalog_size"),
-            "catalog_notice": job.get("catalog_notice"),
-            "dedup_skipped": job.get("dedup_skipped"),
-            "dedup_all_seen": job.get("dedup_all_seen", False),
+            "status": row.get("status") or "done",
+            "stage": row.get("status") or "done",
+            "log_tail": [],
+            "log_count": 0,
+            "error": row.get("error"),
+            "summary": row.get("summary"),
+            "keepa_exhausted": False,
+            "keepa_tokens_left": None,
+            "current": None,
+            "total": None,
+            "current_activity": None,
+            "urls_discovered": None,
+            "urls_after_filter": None,
+            "eta_seconds": None,
+            "requested_limit": None,
+            "requested_brands": None,
+            "catalog_size": None,
+            "catalog_notice": None,
+            "dedup_skipped": None,
+            "dedup_all_seen": False,
         })
+    return jsonify({
+        "status": job["status"],
+        "stage": job["stage"],
+        "log_tail": job["log"][-25:],
+        "log_count": len(job["log"]),
+        "error": job["error"],
+        "summary": job["summary"],
+        "keepa_exhausted": job.get("keepa_exhausted", False),
+        "keepa_tokens_left": job.get("keepa_tokens_left"),
+        "current": job.get("current"),
+        "total": job.get("total"),
+        "current_activity": job.get("current_activity"),
+        "urls_discovered": job.get("urls_discovered"),
+        "urls_after_filter": job.get("urls_after_filter"),
+        "eta_seconds": job.get("eta_seconds"),
+        "requested_limit": job.get("requested_limit"),
+        "requested_brands": job.get("requested_brands"),
+        "catalog_size": job.get("catalog_size"),
+        "catalog_notice": job.get("catalog_notice"),
+        "dedup_skipped": job.get("dedup_skipped"),
+        "dedup_all_seen": job.get("dedup_all_seen", False),
+    })
 
 
 @app.route("/api/download/<job_id>")
@@ -815,10 +951,15 @@ def api_status(job_id: str):
 def api_download(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-    if job is None or not job.get("output_file"):
+    path = job.get("output_file") if job else None
+    if not path:
+        store = _job_store()
+        row = store.get_job(job_id) if store else None
+        path = (row or {}).get("output_file")
+    if not path or not Path(path).is_file():
         abort(404)
     return send_file(
-        job["output_file"],
+        path,
         as_attachment=True,
         download_name=f"sourcing_{job_id}.xlsx",
     )
@@ -859,6 +1000,55 @@ def api_history_reset():
         return jsonify({"ok": False, "error": "History DB unavailable"}), 500
     removed = hist.reset()
     return jsonify({"ok": True, "removed": removed})
+
+
+@app.route("/api/schedules")
+@require_login
+def api_schedules_list():
+    store = _job_store()
+    if store is None:
+        return jsonify({"schedules": []})
+    return jsonify({"schedules": store.list_schedules()})
+
+
+@app.route("/api/schedules/<sid>/toggle", methods=["POST"])
+@require_login
+def api_schedules_toggle(sid: str):
+    store = _job_store()
+    if store is None:
+        return jsonify({"ok": False}), 500
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", True))
+    store.set_enabled(sid, enabled)
+    return jsonify({"ok": True, "enabled": enabled})
+
+
+@app.route("/api/schedules/<sid>", methods=["DELETE"])
+@require_login
+def api_schedules_delete(sid: str):
+    store = _job_store()
+    if store is None:
+        return jsonify({"ok": False}), 500
+    return jsonify({"ok": store.delete_schedule(sid)})
+
+
+@app.route("/api/jobs/recent")
+@require_login
+def api_jobs_recent():
+    store = _job_store()
+    if store is None:
+        return jsonify({"jobs": []})
+    rows = []
+    for j in store.recent_jobs(15):
+        rows.append({
+            "id": j["id"],
+            "status": j.get("status"),
+            "source": j.get("source"),
+            "created_at": j.get("created_at"),
+            "has_file": bool(j.get("output_file")),
+            "error": j.get("error"),
+        })
+    return jsonify({"jobs": rows})
 
 
 # ---------------------------------------------------------------- #
@@ -1812,6 +2002,66 @@ INDEX_HTML = r"""
       font-size: 12px;
     }
 
+    .schedule-time-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .schedule-time-row label {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0;
+    }
+    .schedule-time-row input[type="time"] {
+      width: 130px;
+    }
+    .side-panel {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 20px 0 8px;
+    }
+    @media (max-width: 720px) {
+      .side-panel { grid-template-columns: 1fr; }
+    }
+    .side-col {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 20px;
+    }
+    .ops-list { display: flex; flex-direction: column; gap: 8px; }
+    .ops-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--graphite);
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .ops-row:last-child { border-bottom: none; }
+    .ops-row .ops-main { flex: 1; min-width: 0; }
+    .ops-row .ops-label {
+      color: var(--ink);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ops-row .ops-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .ops-row a, .ops-row button.linkish {
+      color: var(--brand);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      padding: 0;
+    }
+
     .log-shell { position: relative; }
     .log-shell::before {
       content: "Live log";
@@ -2103,7 +2353,7 @@ INDEX_HTML = r"""
 
   <section class="hero">
     <h1>Find products worth <em>listing</em>.</h1>
-    <p>Pick a supplier, choose how many products to analyze, and get back a filtered list with real profit numbers and Amazon competition data.</p>
+    <p>Pick a supplier, choose how many products to analyze, and get back a filtered list with real profit numbers and Amazon competition data. Searches run on the server — you can close this page.</p>
   </section>
 
   <form id="runForm">
@@ -2149,7 +2399,8 @@ INDEX_HTML = r"""
                      placeholder="e.g., 5">
               <div class="field-hint">
                 Deducted from profit. iHerb is applied automatically:
-                $5 under $25, free at $25+. Zoro is free.
+                $5 under $25, free at $25+. Other suppliers default to $0;
+                set a value here if that store charges shipping.
               </div>
             </div>
           </div>
@@ -2161,21 +2412,38 @@ INDEX_HTML = r"""
                 <span>Re-analyze products from previous runs</span>
               </label>
               <div class="field-hint">
-                By default, products already downloaded on earlier runs are
-                skipped so Keepa tokens (~7 per product) aren't wasted
-                re-analyzing them.
+                Each new search skips products already analyzed, so the same
+                items are not sent to Keepa twice. Tick the box only if you
+                want those products scored again.
               </div>
             </div>
             <div class="field history-panel">
-              <label>Run history</label>
+              <label>Start from scratch</label>
               <div class="history-stats" id="historyStats">
                 <span class="pill" id="historyPill">Loading…</span>
                 <button type="button" class="btn-ghost btn-reset-history"
-                        id="resetHistoryBtn">Reset history</button>
+                        id="resetHistoryBtn">Clear old searches</button>
               </div>
               <div class="field-hint">
-                Wipe the record of previously-analyzed products so the next
-                run treats everything as new.
+                Clears the skip list so the next search treats every product
+                as new.
+              </div>
+            </div>
+          </div>
+
+          <div class="fieldset">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="checkbox-label">
+                <input type="checkbox" id="scheduleDaily">
+                <span>Run this search every day</span>
+              </label>
+              <div class="schedule-time-row">
+                <label for="scheduleTime">Time (US Central)</label>
+                <input type="time" id="scheduleTime" value="06:00">
+              </div>
+              <div class="field-hint">
+                Saved on the server. The search still runs if this computer
+                is off. Leave unchecked for a one-time run.
               </div>
             </div>
           </div>
@@ -2260,6 +2528,7 @@ INDEX_HTML = r"""
         <div class="footnote">
           Out-of-stock supplier products are skipped automatically.
           Analysis takes roughly 20 seconds per product. Each product costs ~7 Keepa tokens.
+          The run continues on the server if you close this page.
         </div>
         <button type="submit" class="btn-run" id="runBtn">
           <span class="label">Start analysis</span>
@@ -2269,6 +2538,23 @@ INDEX_HTML = r"""
       </div>
     </div>
   </form>
+
+  <div class="side-panel" id="opsPanel">
+    <div class="side-col">
+      <h3 class="section-title">Daily searches</h3>
+      <div class="field-hint" style="margin-bottom:10px;">
+        These fire on the server at the time you saved. Pause or remove any time.
+      </div>
+      <div id="scheduleList" class="ops-list">Loading…</div>
+    </div>
+    <div class="side-col">
+      <h3 class="section-title">Recent runs</h3>
+      <div class="field-hint" style="margin-bottom:10px;">
+        Download a spreadsheet after you log back in — including overnight jobs.
+      </div>
+      <div id="recentList" class="ops-list">Loading…</div>
+    </div>
+  </div>
 
   <div class="progress-card" id="progressCard">
     <div class="stages">
@@ -2392,6 +2678,11 @@ const PRESETS = {{ presets|tojson }};
 const SUPPLIER_SHIPPING = [
   { match: "iherb.com", fee: 0 },
   { match: "zoro.com",  fee: 0 },
+  { match: "walmart.com", fee: 0 },
+  { match: "samsclub.com", fee: 0 },
+  { match: "tractorsupply.com", fee: 0 },
+  { match: "farmandfleet.com", fee: 0 },
+  { match: "maxwarehouse.com", fee: 0 },
 ];
 
 function defaultShippingFor(url) {
@@ -2441,8 +2732,7 @@ document.getElementById("resetHistoryBtn").addEventListener("click", async () =>
   const original = btn.textContent;
   // Confirm before wiping — this affects future dedup behavior for
   // every subsequent run until new products are re-recorded.
-  if (!confirm("Wipe the run history? Future runs will re-analyze every " +
-               "product from scratch (uses Keepa tokens).")) {
+  if (!confirm("Clear old searches? The next run will analyze products from scratch and will use Keepa tokens on items you have already seen.")) {
     return;
   }
   btn.disabled = true;
@@ -2465,7 +2755,85 @@ document.getElementById("resetHistoryBtn").addEventListener("click", async () =>
 });
 
 refreshHistoryStats();
+refreshSchedules();
+refreshRecentRuns();
 
+function fmtWhen(ts) {
+  if (!ts) return "";
+  try { return new Date(ts * 1000).toLocaleString(); }
+  catch (e) { return ""; }
+}
+
+async function refreshSchedules() {
+  const el = document.getElementById("scheduleList");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/schedules");
+    const data = await r.json();
+    const rows = data.schedules || [];
+    if (!rows.length) {
+      el.textContent = "None yet. Tick “Run this search every day” when you start a search.";
+      return;
+    }
+    el.innerHTML = rows.map(s => {
+      const on = s.enabled ? "On" : "Paused";
+      const nxt = s.next_run_at ? "next " + fmtWhen(s.next_run_at) : "";
+      const toggle = s.enabled ? "false" : "true";
+      const toggleLbl = s.enabled ? "Pause" : "Resume";
+      return '<div class="ops-row" data-sid="' + s.id + '">' +
+        '<div class="ops-main"><div class="ops-label">' + escapeHtml(s.label || s.id) + '</div>' +
+        '<div class="ops-meta">' + on + (nxt ? " · " + nxt : "") + '</div></div>' +
+        '<button type="button" class="linkish" data-act="toggle" data-on="' + toggle + '">' + toggleLbl + '</button>' +
+        '<button type="button" class="linkish" data-act="del">Remove</button></div>';
+    }).join("");
+    el.querySelectorAll("button[data-act]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest(".ops-row");
+        const sid = row && row.getAttribute("data-sid");
+        if (!sid) return;
+        if (btn.dataset.act === "del") {
+          await fetch("/api/schedules/" + sid, { method: "DELETE" });
+        } else {
+          await fetch("/api/schedules/" + sid + "/toggle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: btn.dataset.on === "true" }),
+          });
+        }
+        refreshSchedules();
+      });
+    });
+  } catch (err) {
+    el.textContent = "Could not load daily searches.";
+  }
+}
+
+async function refreshRecentRuns() {
+  const el = document.getElementById("recentList");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/jobs/recent");
+    const data = await r.json();
+    const rows = data.jobs || [];
+    if (!rows.length) {
+      el.textContent = "No runs saved yet.";
+      return;
+    }
+    el.innerHTML = rows.map(j => {
+      const src = j.source || "supplier";
+      const st = j.status || "";
+      const when = fmtWhen(j.created_at);
+      const dl = j.has_file
+        ? '<a href="/api/download/' + j.id + '">Download</a>'
+        : "";
+      return '<div class="ops-row"><div class="ops-main">' +
+        '<div class="ops-label">' + escapeHtml(src) + " · " + escapeHtml(st) + "</div>" +
+        '<div class="ops-meta">' + escapeHtml(when) + "</div></div>" + dl + "</div>";
+    }).join("");
+  } catch (err) {
+    el.textContent = "Could not load recent runs.";
+  }
+}
 
 document.querySelectorAll(".preset").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -2551,6 +2919,8 @@ document.getElementById("runForm").addEventListener("submit", async (e) => {
     random: true,
     no_robots: true,
     include_history: document.getElementById("include_history").checked,
+    schedule_daily: document.getElementById("scheduleDaily").checked,
+    schedule_time: document.getElementById("scheduleTime").value,
     config: config,
   };
 
@@ -2677,6 +3047,8 @@ async function pollStatus(jobId) {
       // Refresh the header history pill so the user sees the new total
       // (this run just added N products to the DB).
       refreshHistoryStats();
+      refreshRecentRuns();
+      refreshSchedules();
       setTimeout(() => showResults(jobId, data.summary, data), 400);
     } else if (data.status === "error") {
       showError(data.error || "Unknown error");
@@ -2873,6 +3245,19 @@ def main() -> None:
         pass
 
     app.run(host="127.0.0.1", port=port, debug=False)
+
+
+def _boot_background() -> None:
+    _job_store()
+    if os.environ.get("SCHEDULER_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+        log.info("Daily scheduler disabled via SCHEDULER_DISABLED")
+        return
+    threading.Thread(
+        target=_scheduler_loop, daemon=True, name="daily-scheduler",
+    ).start()
+
+
+_boot_background()
 
 
 if __name__ == "__main__":
